@@ -144,6 +144,8 @@ def write_report(df: pd.DataFrame, cfg: dict) -> None:
             L.append(f"- **{c}:** SAC residual succeeds where the TP-GMM fails in {win} episodes, and the opposite in "
                      f"{loss} (exact binomial test on the discordant pairs, p = {pv:.2g}).")
     sr = df.groupby(["condition", "policy"]).success.mean() * 100
+    ev = root / "scratch_s0" / "eval.csv"
+    scratch_steps = int(pd.read_csv(ev).timesteps.max()) if ev.exists() else 0
     get = lambda c, p: float(sr.get((c, p), float("nan")))  # noqa: E731
     L += ["", "## Reading\n",
           f"- **SAC residual ≈ TP-GMM.** {get('nominal', 'sac_residual'):.1f} vs {get('nominal', 'tpgmm'):.1f} % "
@@ -154,9 +156,11 @@ def write_report(df: pd.DataFrame, cfg: dict) -> None:
           "cannot know where the cube really is. To correct "
           "them it needs information the TP-GMM does not use: the cube re-detected during the approach (fixed "
           "camera when not occluded, or a wrist camera), or contact/gripper feedback.",
-          f"- **SAC from scratch: {get('nominal', 'sac_scratch'):.0f} %** with its best checkpoint so far (it reaches "
-          "the cube and lifts it in ~10 % of the episodes, but does not bring it to the box yet); see the learning "
-          "curve for the run length.",
+          f"- **SAC from scratch: {get('nominal', 'sac_scratch'):.0f} %** after {scratch_steps / 1e3:.0f} k steps "
+          f"(≈ {scratch_steps / 36e3:.0f} h of robot time at 10 Hz): it reaches the cube and lifts it in ~10 % of the "
+          "episodes but does not bring it to the box yet. The run was cut by a restart of the machine; it can be "
+          "resumed from its last checkpoint (`train_sac.py --resume .../checkpoints/sac_<N>_steps.zip`, without "
+          "its replay buffer).",
           "- **TP-GMM + residual is the practical path to the real robot**: it starts from a working policy, never "
           "explores far from it, and can keep learning on real episodes (`scripts/run_sac_real.py --finetune`).", ""]
     L += ["## Residual: what went wrong first\n",

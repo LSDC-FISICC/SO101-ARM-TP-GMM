@@ -29,7 +29,7 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 5 | Evaluación leave-one-out (segmentado vs monolítico vs planificador IK vs LPV-DS), inferencia imagen → trayectoria articular, stub del robot → [`docs/evaluation_report.md`](docs/evaluation_report.md) | ✅ |
 | 6 | Alternativa estable: LPV-DS (campo de velocidades con estabilidad garantizada) y prueba de perturbaciones → [`docs/lpvds_report.md`](docs/lpvds_report.md), [`docs/perturbation_report.md`](docs/perturbation_report.md), [`docs/ds_field.md`](docs/ds_field.md) | ✅ experimental |
 | 7 | Simulación en MuJoCo con 3 cubos aleatorios y las políticas aprendidas → [`docs/mujoco_sim.md`](docs/mujoco_sim.md) | ✅ |
-| 8 | SAC desde cero y residual sobre el TP-GMM (simulación y robot real) → [`docs/sac_report.md`](docs/sac_report.md) | ✅ residual · ⏳ desde cero |
+| 8 | SAC desde cero y residual sobre el TP-GMM (simulación y robot real) → [`docs/sac_report.md`](docs/sac_report.md) | ✅ residual · desde cero: 0 % a 780 k pasos |
 
 ## Instalación
 
@@ -210,7 +210,8 @@ Detalle en [`docs/sac_report.md`](docs/sac_report.md).
     unidades al sostener dejan la pinza más ancha que el cubo. Ahora el gripper sigue al TP-GMM.
   - El residual no puede corregir errores de percepción porque ve la misma foto que el TP-GMM. Para mejorar
     necesita información nueva: el cubo re-detectado durante la aproximación o una cámara en la muñeca.
-- **SAC desde cero** aprende a alcanzar el cubo y a veces a levantarlo, pero todavía no lo deposita.
+- **SAC desde cero** (780 000 pasos, unas 22 h de tiempo de robot) aprende a alcanzar el cubo y a veces a
+  levantarlo, pero todavía no lo deposita.
   Pick-and-place desde cero necesita del orden de 10⁶ pasos (unas 28 h de tiempo de robot). Por eso, en el
   robot real, lo viable es el residual o ajustar una política entrenada en simulación.
 - **Robot real:** `scripts/run_sac_real.py` despliega la política (`--episodes N`) o la sigue entrenando

@@ -38,7 +38,7 @@ Multi-cube results with the other policies: `mujoco_sim.md`.
 ## Reading
 
 - **SAC residual ≈ TP-GMM.** 96.5 vs 95.5 % (nominal) and 81.5 vs 78.5 % (8 mm perception noise): slightly better, not significantly. It keeps the TP-GMM's success, which the first attempts did not, but adds little. The TP-GMM's failures grow with the perception error (4.5 → 21.5 %), and the residual observes the same single camera snapshot, so it cannot know where the cube really is. To correct them it needs information the TP-GMM does not use: the cube re-detected during the approach (fixed camera when not occluded, or a wrist camera), or contact/gripper feedback.
-- **SAC from scratch: 0 %** with its best checkpoint so far (it reaches the cube and lifts it in ~10 % of the episodes, but does not bring it to the box yet); see the learning curve for the run length.
+- **SAC from scratch: 0 %** after 780 k steps (≈ 22 h of robot time at 10 Hz): it reaches the cube and lifts it in ~10 % of the episodes but does not bring it to the box yet. The run was cut by a restart of the machine; it can be resumed from its last checkpoint (`train_sac.py --resume .../checkpoints/sac_<N>_steps.zip`, without its replay buffer).
 - **TP-GMM + residual is the practical path to the real robot**: it starts from a working policy, never explores far from it, and can keep learning on real episodes (`scripts/run_sac_real.py --finetune`).
 
 ## Residual: what went wrong first
