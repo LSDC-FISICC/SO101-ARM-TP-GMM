@@ -29,6 +29,7 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 5 | Evaluación leave-one-out (segmentado vs monolítico vs planificador IK vs LPV-DS), inferencia imagen → trayectoria articular, stub del robot → [`docs/evaluation_report.md`](docs/evaluation_report.md) | ✅ |
 | 6 | Alternativa estable: LPV-DS (campo de velocidades con estabilidad garantizada) y prueba de perturbaciones → [`docs/lpvds_report.md`](docs/lpvds_report.md), [`docs/perturbation_report.md`](docs/perturbation_report.md), [`docs/ds_field.md`](docs/ds_field.md) | ✅ experimental |
 | 7 | Simulación en MuJoCo con 3 cubos aleatorios y las políticas aprendidas → [`docs/mujoco_sim.md`](docs/mujoco_sim.md) | ✅ |
+| 8 | SAC desde cero y residual sobre el TP-GMM (simulación y robot real) → [`docs/sac_report.md`](docs/sac_report.md) | ✅ residual · ⏳ desde cero |
 
 ## Instalación
 
@@ -146,24 +147,26 @@ se cae, cuenta igual.
 
 | política | entregados (como se entrenó) | dentro al final, un punto de liberación | dentro al final, casillas | dentro al final, casillas + 8 mm de ruido (agarre asistido) |
 |---|---|---|---|---|
-| TP-GMM segmentado | **96 %** | 77 % | **92 %** | **84 %** |
-| TP-GMM monolítico | 87 % | 76 % | 89 % | 84 % |
-| Planificador IK | 86 % | **81 %** | 82 % | 68 % |
-| LPV-DS | 61 % | 59 % | 60 % | 64 % |
+| TP-GMM segmentado | 96 % | 78 % | **93 %** | **87 %** |
+| TP-GMM monolítico | 89 % | 74 % | 89 % | 82 % |
+| Planificador IK | 87 % | 81 % | 82 % | 70 % |
+| LPV-DS | 61 % | 58 % | 61 % | 68 % |
+| SAC residual sobre TP-GMM | **99 %** | **88 %** | 88 % (ignora las casillas) | 80 % |
 
-- **El TP-GMM segmentado es el mejor:** entrega el 96 % de los cubos; también gana en tres de las cuatro
-  condiciones de "dentro al final".
+- **El TP-GMM segmentado y su SAC residual son los mejores:** entregan el 96 % y el 99 % de los cubos
+  (diferencia no significativa). Sin el residual, el TP-GMM gana en tres de las cuatro condiciones de
+  "dentro al final".
 - **Un solo punto de liberación apila los cubos.** Cada demostración tenía un solo cubo, así que la política
   suelta los tres en el mismo lugar. Para la tarea no importa (se entregan igual). Si hiciera falta que
   queden dentro, basta desplazar el marco del recipiente para cada cubo (casillas): es un cambio de
-  parámetro de tarea al ejecutar, sin reentrenar, y sube "dentro al final" de 77 a 92 %.
-- **LPV-DS agarra muchos menos cubos** (61 % frente a 97 %). La pose de reposo deja la pinza a la altura de
+  parámetro de tarea al ejecutar, sin reentrenar, y sube "dentro al final" de 78 a 93 %.
+- **LPV-DS agarra muchos menos cubos** (62 % frente a 97 %). La pose de reposo deja la pinza a la altura de
   la mesa, y el campo, que depende solo de la posición, va casi en horizontal hacia el cubo con la pinza aún
   cerrada y lo empuja. El TP-GMM reproduce el "subir y luego acercarse" del operador. La evaluación offline
   no podía ver este problema.
 - **El planificador IK** omite el 11–14 % de los cubos porque algún punto de su trayectoria no es alcanzable.
 - **La percepción importa tanto como la política:** con 8 mm de ruido (el error típico de la visión actual)
-  el TP-GMM baja de 97 a 84 % incluso con agarre asistido.
+  el TP-GMM baja de 97 a 87 % incluso con agarre asistido.
 
 Ejecutarla:
 
@@ -177,6 +180,57 @@ scripts/fetch_so101_mujoco.sh
 
 ```bash
 MUJOCO_GL=egl python scripts/simulate_mujoco.py --episodes 30 --noise-mm 0 8 --video 1
+```
+
+## SAC: desde cero y residual sobre el TP-GMM
+
+Mismo entorno en MuJoCo y en el robot real (`so101_tpgmm/rl/`):
+- **Observación:** articulaciones, TCP por FK, cubo según una foto de la cámara al inicio, punto de
+  liberación y tiempo.
+- **Acción:** objetivo cartesiano → IK → comandos a 30 Hz.
+
+Hay dos variantes:
+- **desde cero:** SAC mueve el objetivo y el gripper;
+- **residual:** SAC suma correcciones de posición y orientación (≤ 1 cm, ≤ 8°) al plan del TP-GMM. Con
+  acción cero se ejecuta el TP-GMM.
+
+Detalle en [`docs/sac_report.md`](docs/sac_report.md).
+
+![TP-GMM, SAC residual, SAC desde cero y planificador IK](docs/figures/sim_montage_sac_seed3.gif)
+
+| un cubo, 200 episodios | TP-GMM solo | SAC residual | SAC desde cero |
+|---|---|---|---|
+| distribución de entrenamiento | 95,5 % | 96,5 % | 0 % |
+| percepción con 8 mm de error | 78,5 % | 81,5 % | 0 % |
+
+- **El residual iguala al TP-GMM**, sin diferencia significativa (p = 0,5 y 0,21). Con tres cubos entrega el
+  99 % frente al 96 %, y deja dentro del recipiente el 88 % frente al 78 % (p = 0,08); con agarre asistido la
+  diferencia se invierte.
+  - Los primeros intentos empeoraban al TP-GMM (93 → 33 %). Corregirle el gripper era un precipicio: +9
+    unidades al sostener dejan la pinza más ancha que el cubo. Ahora el gripper sigue al TP-GMM.
+  - El residual no puede corregir errores de percepción porque ve la misma foto que el TP-GMM. Para mejorar
+    necesita información nueva: el cubo re-detectado durante la aproximación o una cámara en la muñeca.
+- **SAC desde cero** aprende a alcanzar el cubo y a veces a levantarlo, pero todavía no lo deposita.
+  Pick-and-place desde cero necesita del orden de 10⁶ pasos (unas 28 h de tiempo de robot). Por eso, en el
+  robot real, lo viable es el residual o ajustar una política entrenada en simulación.
+- **Robot real:** `scripts/run_sac_real.py` despliega la política (`--episodes N`) o la sigue entrenando
+  (`--finetune N`). Incluye límites de seguridad, abortar si el brazo no sigue el comando y éxito confirmado
+  por el operador.
+
+```bash
+pip install -e ".[rl]"
+```
+
+```bash
+python scripts/train_sac.py --mode residual --steps 300000 --n-envs 2 --gradient-steps 2
+```
+
+```bash
+python scripts/train_sac.py --mode scratch --steps 2000000 --n-envs 2 --learning-starts 20000
+```
+
+```bash
+python scripts/run_sac_real.py --model outputs/models/sac/residual_s0/best_model.zip --mode residual --episodes 10 --port /dev/ttyACM0
 ```
 
 ## TP-GMM vs LPV-DS: ¿vale la pena?
@@ -304,6 +358,11 @@ so101_tpgmm/
     scene.py                  escena MuJoCo: SO-101 oficial, dedos por cajas, mesa inclinada (FK), recipiente, cubos
     runner.py                 servos de posición a 30 Hz, mapeo del gripper, agarre por contacto o asistido
     episode.py                episodio: cubos aleatorios, posición en la convención de la política, ejecución
+  rl/
+    task.py                   observación/acción comunes (simulación y robot): objetivo cartesiano, IK, límites
+    sim_env.py                entorno Gymnasium en MuJoCo: recompensa por etapas, aleatorización de dominio
+    real_env.py               el mismo entorno en el SO-101 real (cámara, seguridad, éxito del operador)
+    agent.py                  política SAC en lazo cerrado dentro de la simulación de tres cubos
   robot/so101_runner.py       stub para ejecutar en SO101Follower (LeRobot), con modo dry-run
 scripts/
   inspect_dataset.py          Fase 0: reporte, figuras y CSV por episodio
@@ -320,7 +379,10 @@ scripts/
   plot_lpvds.py               figura de Gaussianas de LPV-DS y rollouts vs demostraciones
   perturbation_benchmark.py   robustez: control indexado en el tiempo vs LPV-DS ante perturbaciones
   fetch_so101_mujoco.sh       descarga el modelo MuJoCo oficial del SO-101 (TheRobotStudio, Apache-2.0)
-  simulate_mujoco.py          simulación MuJoCo: 3 cubos aleatorios, las 4 políticas, videos y reporte
+  simulate_mujoco.py          simulación MuJoCo: 3 cubos aleatorios, todas las políticas, videos y reporte
+  train_sac.py                entrena SAC (desde cero o residual sobre el TP-GMM)
+  eval_sac.py                 evaluación de SAC vs TP-GMM y reporte; plot_sac.py: curvas de aprendizaje
+  run_sac_real.py             SAC en el robot real: despliegue y ajuste fino
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)
@@ -333,12 +395,13 @@ docs/
   tpgmm_report.md             entrenamiento, selección por BIC, componentes (generado)
   evaluation_report.md        comparación leave-one-out de los cuatro modelos (generado)
   mujoco_sim.md               simulación MuJoCo de las políticas (generado)
+  sac_report.md               SAC desde cero y residual (generado)
   ds_field.md                 campo vectorial / divergencia del GMR-DS (generado)
   lpvds_report.md             modelo LPV-DS (generado)
   perturbation_report.md      prueba de perturbaciones (generado)
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
-tests/                        pytest (103 tests)
+tests/                        pytest (107 tests)
 ```
 
 ## Decisiones de diseño

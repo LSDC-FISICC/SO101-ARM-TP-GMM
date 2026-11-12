@@ -260,6 +260,20 @@ def reading(df: pd.DataFrame, s: pd.DataFrame) -> list[str]:
                    f"{v(False, 'contact', 'segmented', 'cubes lifted'):.0f} % for the segmented model, consistent with the "
                    "offline finding that, without the primitive boundary, its gripper closes ~0.5 s away from the "
                    "demonstrated contact (`evaluation_report.md`).")
+    if "sac_residual" in pols and "segmented" in pols:
+        from scipy.stats import binomtest
+
+        d0 = df[(df.noise_mm == 0) & (~df.slots) & (df.grasp_mode == "contact")]
+        a = d0[d0.policy == "segmented"].set_index(["seed", "cube"]).in_box
+        b = d0[d0.policy == "sac_residual"].set_index(["seed", "cube"]).in_box
+        w, lo = int((b & ~a).sum()), int((a & ~b).sum())
+        pv = binomtest(w, w + lo).pvalue if w + lo else 1.0
+        out.append(f"- **SAC residual vs TP-GMM** (same layouts, contact, one release point): delivered "
+                   f"{v(False, 'contact', 'sac_residual', 'delivered'):.0f} vs {v(False, 'contact', 'segmented', 'delivered'):.0f} %, "
+                   f"in the box {v(False, 'contact', 'sac_residual'):.0f} vs {v(False, 'contact', 'segmented'):.0f} % "
+                   f"(residual better on {w} cubes, worse on {lo}; p = {pv:.2g}); with grasp assist the difference "
+                   "reverses: equivalent within these 90 cubes. The residual ignores box slots (it observes a fixed "
+                   "release point), hence its unchanged numbers with slots.")
     gains = {p: v(True, "contact", p) - v(False, "contact", p) for p in pols}
     out.append("- **One release point vs box slots:** with every cube released at the same spot they pile up and some fall "
                "out; shifting the box frame per cube (a task parameter changed at execution, never varied in the "

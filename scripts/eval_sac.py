@@ -117,6 +117,10 @@ def write_report(df: pd.DataFrame, cfg: dict) -> None:
          "zero-initialized mean (starts as the TP-GMM), exploration σ = 0.2, critic-only warm-up of 50 k steps, "
          "actor learning rate ×0.1, fixed entropy coefficient 0.002, 2 updates per step.", ""]
     L += ["## Learning curves\n", "![](figures/sac_learning_curves.png)\n"]
+    if resolve_path("docs/figures/sim_montage_sac_seed3.gif").exists():
+        L += ["Three cubes, same layout (`simulate_mujoco.py`; the from-scratch panel is cut after ~30 s, then the "
+              "final state of every panel):\n", "![](figures/sim_montage_sac_seed3.gif)\n",
+              "Multi-cube results with the other policies: `mujoco_sim.md`.\n"]
     L += ["## Evaluation (single cube, deterministic policies, same seeds)\n",
           "| condition | policy | success [95 % CI] | cube lifted | mean time [s] | episodes |", "|---|---|---|---|---|---|"]
     df = df.assign(_c=df.condition.map({c: i for i, c in enumerate(COND)}),
