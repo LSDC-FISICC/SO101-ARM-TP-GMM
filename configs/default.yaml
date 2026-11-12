@@ -156,6 +156,20 @@ tpgmm:
   boundary_blend: 0.3          # fraction of a primitive used to blend its start into the previous end
   models_dir: outputs/models
 
+evaluation:
+  n_folds: 100               # held-out cycles for leave-one-out (stratified); 'all' for every cycle
+  workers: 4
+
+inference:
+  policy: segmented          # segmented | monolithic | ik_planner
+  color_order: [red, yellow, green, blue]
+  home_joints_deg: [-5.7, -104.3, 91.3, 76.3, 2.8]   # median rest posture of the demonstrations
+  home_gripper: 1.5
+  return_home_s: 2.0         # joint-space return to home between cubes
+  dt: 0.0333                 # 30 Hz, like the dataset
+  require_full_ik: true      # skip a cube if any trajectory point has no IK solution
+  output_dir: outputs/inference
+
 inspection:
   output_report: docs/dataset_report.md
   figures_dir: docs/figures

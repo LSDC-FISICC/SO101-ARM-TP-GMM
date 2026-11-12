@@ -26,7 +26,7 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 2 | Segmentación en ciclos y primitivas (approach+grasp, transport+release) con filtros físicos → [`docs/segmentation_report.md`](docs/segmentation_report.md) | ✅ |
 | 3 | Visión con la cámara fija: detección HSV, yaw plegado, homografía con RANSAC, validación de escena → [`docs/vision_report.md`](docs/vision_report.md) | ✅ |
 | 4 | TP-GMM en numpy (EM + GMR, producto de Gaussianas, BIC): segmentado (principal) y monolítico; en paralelo, planificador por IK sobre las mismas primitivas → [`docs/tpgmm_report.md`](docs/tpgmm_report.md) | ✅ |
-| 5 | Evaluación leave-one-out, inferencia desde imagen y stub del robot | pendiente |
+| 5 | Evaluación leave-one-out (segmentado vs monolítico vs planificador IK), inferencia imagen → trayectoria articular, stub del robot → [`docs/evaluation_report.md`](docs/evaluation_report.md) | ✅ |
 
 ## Instalación
 
@@ -56,6 +56,36 @@ Correr los tests (los que usan el dataset real se saltan si no está descargado)
 
 ```bash
 python -m pytest
+```
+
+Pipeline completo, en orden (cada paso escribe lo que usa el siguiente):
+
+```bash
+python scripts/segment_dataset.py
+```
+
+```bash
+python scripts/vision_pipeline.py
+```
+
+```bash
+python scripts/train.py
+```
+
+```bash
+python scripts/evaluate_offline.py --workers 4
+```
+
+Inferencia desde una foto de la cámara fija, con el robot en reposo:
+
+```bash
+python scripts/infer.py --image foto.png --colors red yellow green
+```
+
+Ejecutar en el robot real (en la máquina conectada al brazo; probar antes con `--dry-run`):
+
+```bash
+python -m so101_tpgmm.robot.so101_runner --npz outputs/inference/foto.npz --port /dev/ttyACM0
 ```
 
 Cualquier parámetro de `configs/default.yaml` se puede sobrescribir desde la línea de comandos:
@@ -166,7 +196,9 @@ so101_tpgmm/
     demos.py                  demostraciones, marcos cubo/caja, simetría de 90° del cubo
     policy.py                 política segmentada / monolítica, continuidad entre primitivas
   planner/ik_planner.py       planificador geométrico por waypoints (línea base)
-  robot/                      (fase siguiente)
+  evaluation/metrics.py       métricas: RMSE, error de agarre/soltado, factibilidad IK
+  inference.py                imagen → cubos → trayectorias → articulaciones (orden de colores)
+  robot/so101_runner.py       stub para ejecutar en SO101Follower (LeRobot), con modo dry-run
 scripts/
   inspect_dataset.py          Fase 0: reporte, figuras y CSV por episodio
   calibrate_camera_grid.py    calibración métrica con la cuadrícula
@@ -175,6 +207,8 @@ scripts/
   vision_pipeline.py          Fase 3: detección, calibración, marcos del cubo por ciclo, reporte
   debug_detections.py         imágenes con las detecciones dibujadas (episodios o cualquier imagen)
   train.py                    Fase 4: entrena TP-GMM segmentado, monolítico y el planificador por IK
+  evaluate_offline.py         Fase 5: validación leave-one-out por ciclo y figuras
+  infer.py                    Fase 5: imagen (o episodio) → .npz/.csv con la trayectoria articular
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)
@@ -185,6 +219,7 @@ docs/
   vision_report.md            visión y calibración píxel→base (generado)
   cube_frames.csv             marco del cubo por ciclo (visión y FK), color y banderas
   tpgmm_report.md             entrenamiento, selección por BIC, componentes (generado)
+  evaluation_report.md        comparación leave-one-out de los tres modelos (generado)
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
 tests/                        pytest (34 tests)
