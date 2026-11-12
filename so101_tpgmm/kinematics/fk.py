@@ -104,6 +104,29 @@ class SO101Kinematics:
                 raise NotImplementedError(f"Joint type {j.type!r} not supported")
         return T[0] if single else T
 
+    def fk_with_joint_frames(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """TCP pose plus the world origin and axis of every actuated joint.
+
+        Used for the analytic geometric Jacobian. Args: ``q`` (5,) radians.
+
+        Returns:
+            (T_tcp (4, 4), origins (5, 3), axes (5, 3)) in the base frame.
+        """
+        q = np.asarray(q, dtype=np.float64)
+        T = np.eye(4)
+        origins, axes = [], []
+        k = 0
+        for j in self.chain:
+            T = T @ j.origin
+            if j.type in ("revolute", "continuous"):
+                origins.append(T[:3, 3].copy())
+                axes.append(T[:3, :3] @ j.axis)
+                M = np.eye(4)
+                M[:3, :3] = _axis_angle_batch(j.axis, np.array([q[k]]))[0]
+                T = T @ M
+                k += 1
+        return T, np.array(origins), np.array(axes)
+
     def fk_position(self, q: np.ndarray) -> np.ndarray:
         """TCP position(s) in metres, ``(3,)`` or ``(N, 3)``."""
         T = self.fk(q)

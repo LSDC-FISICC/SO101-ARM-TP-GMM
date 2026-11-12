@@ -24,6 +24,28 @@ kinematics:
   base_link: base_link
   tcp_link: gripper_frame_link
   joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]
+  joint_limits:
+    # URDF limits are violated by the demonstrations themselves (rest pose shoulder_lift
+    # -104.4 deg < -100 deg), so IK uses the union of URDF limits and the observed range.
+    source: urdf_union_observed     # or: urdf
+    margin_deg: 1.0
+    observed_deg:                   # Phase 0: min/max of observation.state over all frames
+      shoulder_pan: [-98.6, 84.2]
+      shoulder_lift: [-105.1, 95.2]
+      elbow_flex: [-94.0, 96.9]
+      wrist_flex: [-3.6, 101.8]
+      wrist_roll: [-53.1, 110.6]
+  ik:
+    pos_tol: 0.001          # [m] success tolerance
+    yaw_tol_deg: 1.0        # success tolerance
+    yaw_weight: 0.05        # [m/rad] residual scaling of the yaw error
+    reg_weight: 0.001       # [m/rad] pull towards the previous posture (redundant DOF)
+    min_yaw_observability: 0.2
+    # Redundancy (5 joints, 4 task constraints): soft approach-pitch target, then a
+    # task-priority polish so position/yaw are exact. Pitch = tilt of the approach axis
+    # from straight down, + = leaning outward (demos: ~9 deg at grasp, ~27 deg near table).
+    pitch_weight: 0.02      # [m/rad]
+    default_pitch_deg: 15.0 # used when no pitch is supplied (null = no pitch term)
   # Centre of a grasped cube expressed in the TCP (gripper_frame_link) frame [m].
   # PRELIMINARY: jointly fitted with the pixel->XY homography (Phase 0, docs/dataset_report.md §6).
   # Lowers the homography error 10.6 -> 8.4 mm; bootstrap 95% CI ~ +-2-5 mm per axis.
