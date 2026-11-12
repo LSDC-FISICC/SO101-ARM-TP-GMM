@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from so101_tpgmm.config import load_config, resolve_path  # noqa: E402
 from so101_tpgmm.data.lerobot_dataset import LeRobotV3Dataset  # noqa: E402
+from so101_tpgmm.kinematics.equations import equations_markdown, update_report  # noqa: E402
 from so101_tpgmm.kinematics.ik import approach_pitch, ik_from_config, tool_yaw, yaw_observability  # noqa: E402
 
 
@@ -38,9 +39,15 @@ def main() -> None:
     ap.add_argument("--n-random", type=int, default=300)
     ap.add_argument("--n-episodes", type=int, default=30)
     ap.add_argument("--grid-step", type=float, default=0.02)
+    ap.add_argument("--equations-only", action="store_true",
+                    help="only (re)write the equations section of the existing report (seconds, not minutes)")
     args = ap.parse_args()
     cfg = load_config(args.config, args.set)
     ik = ik_from_config(cfg)
+    if args.equations_only:
+        update_report(resolve_path("docs/kinematics_report.md"), ik)
+        print("equations section written")
+        return
     kin = ik.kin
     pax = ik.pan_axis_xy
     L: list[str] = []
@@ -149,6 +156,7 @@ def main() -> None:
                   for n, lo, hi in zip(kin.joint_names, ik.lower, ik.upper)) + ".")
     A(f"- **Success:** position error ≤ {ik.pos_tol * 1e3:.1f} mm, yaw error ≤ {np.rad2deg(ik.yaw_tol):.1f}°, "
       "inside limits, yaw defined at the solution. Otherwise the target is flagged — never clipped.\n")
+    A(equations_markdown(ik) + "\n")
     A("## Solver\n")
     A("Seeds come first from the **closed-form decoupling IK** (`kinematics/analytic.py`, the corrected "
       "model of Rivas 2026, see `kinematics_paper_review.md`): both elbow branches, filtered by joint limits, "

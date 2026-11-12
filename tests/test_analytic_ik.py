@@ -89,3 +89,31 @@ def test_two_elbow_branches(kin, aik):
     front = [s for s in sols if abs(wrapdiff(s[0], q[0])) < 1e-3]
     assert len(front) == 2
     assert abs(front[0][2] - front[1][2]) > 0.1  # elbow up / down differ
+
+
+def test_closed_form_fk_matches_urdf_chain(kin, aik):
+    from so101_tpgmm.kinematics.analytic import closed_form_fk
+    from so101_tpgmm.kinematics.ik import approach_pitch
+
+    rng = np.random.default_rng(3)
+    for _ in range(300):
+        q = rng.uniform(kin.lower, kin.upper)
+        T_ref, T_cf = kin.fk(q), closed_form_fk(q, aik.g)
+        np.testing.assert_allclose(T_cf, T_ref, atol=5e-5)
+        if abs(np.sin(q[0])) < 0.99 and np.hypot(*(T_ref[:2, 3] - aik.g.pan_xy)) > 0.05:
+            beta = q[1] + q[2] + q[3]
+            pitch = approach_pitch(T_ref, aik.g.pan_xy)
+            assert abs(np.arctan2(np.sin(pitch - (np.pi / 2 - beta)), np.cos(pitch - (np.pi / 2 - beta)))) < 0.05 \
+                or abs(np.arctan2(np.sin(pitch + (np.pi / 2 - beta)), np.cos(pitch + (np.pi / 2 - beta)))) < 0.05
+
+
+def test_equations_section_is_generated_and_verified():
+    from so101_tpgmm.config import load_config
+    from so101_tpgmm.kinematics.equations import EQ_END, EQ_START, equations_markdown, verification_errors
+    from so101_tpgmm.kinematics.ik import ik_from_config
+
+    ik = ik_from_config(load_config())
+    err = verification_errors(ik, n=200)
+    assert err["fk"] < 1e-4 and err["ik_deg"] < 0.5 and err["q5_deg"] < 0.05
+    md = equations_markdown(ik)
+    assert md.startswith(EQ_START) and md.endswith(EQ_END) and "q_5 = -\\mathrm{atan2}(M_{32}, M_{33})" in md

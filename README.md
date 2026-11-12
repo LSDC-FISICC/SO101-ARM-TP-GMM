@@ -23,9 +23,9 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 0 | Inspección del dataset → [`docs/dataset_report.md`](docs/dataset_report.md) | ✅ |
 | 0b | Calibración de la cámara con la cuadrícula de cinta → [`docs/camera_calibration.md`](docs/camera_calibration.md) | ✅ preliminar |
 | 1 | Cinemática: FK desde el URDF e IK numérica (posición + yaw, límites, pitch suave) → [`docs/kinematics_report.md`](docs/kinematics_report.md) | ✅ |
-| 2 | Segmentación por gripper en primitivas (approach+grasp, transport+release) | detector listo |
+| 2 | Segmentación en ciclos y primitivas (approach+grasp, transport+release) con filtros físicos → [`docs/segmentation_report.md`](docs/segmentation_report.md) | ✅ |
 | 3 | Visión con la cámara fija (HSV, minAreaRect, yaw plegado, homografía) | pendiente |
-| 4 | TP-GMM en numpy (EM + GMR con producto de Gaussianas, BIC) | pendiente |
+| 4 | TP-GMM en numpy (EM + GMR con producto de Gaussianas, BIC) y, en paralelo, planificador por IK sobre las mismas primitivas | pendiente |
 | 5 | Evaluación leave-one-out, inferencia desde imagen y stub del robot | pendiente |
 
 ## Instalación
@@ -149,7 +149,9 @@ so101_tpgmm/
   kinematics/
     urdf.py, fk.py            parser de URDF y FK vectorizada (so101_new_calib.urdf incluido)
     ik.py                     IK numérica: posición + yaw de muñeca, límites, pitch suave
-  segmentation/gripper.py     eventos del gripper: histéresis, 3 niveles, duración mínima
+  segmentation/
+    gripper.py                eventos del gripper: histéresis, 3 niveles, duración mínima
+    primitives.py             ciclos y primitivas, filtros físicos, puntos clave
   vision/
     camera_pose.py            homografía con offset del cubo, descomposición, chequeo de espejo
     grid_calibration.py       bordes subpíxel de la cinta y ajuste punto-a-recta
@@ -158,10 +160,14 @@ scripts/
   inspect_dataset.py          Fase 0: reporte, figuras y CSV por episodio
   calibrate_camera_grid.py    calibración métrica con la cuadrícula
   check_kinematics.py         Fase 1: ida y vuelta FK→IK, trayectorias grabadas, mapa de alcance
+  segment_dataset.py          Fase 2: tabla de ciclos/primitivas, reporte y figuras
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)
   kinematics_report.md        verificación de FK/IK y espacio alcanzable (generado)
+  kinematics_paper_review.md  revisión de la cinemática de Rivas (2026) contra el URDF
+  segmentation_report.md      segmentación en primitivas (generado)
+  segmentation_cycles.csv     un registro por ciclo: índices, banderas y puntos clave
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
 tests/                        pytest (34 tests)

@@ -87,6 +87,18 @@ gripper:
   smooth_window: 5          # median filter window (frames, odd)
   plateau_tol: 1.5          # |g - plateau| tolerance used to place contact/release instants
 
+segmentation:
+  # Cycles = OPEN -> HOLD -> OPEN (gripper section) + physical gates; primitives:
+  # approach_grasp [start, contact], transport_release [contact, release complete].
+  grasp_max_z: 0.03          # [m] TCP z at contact must be at table height (no stacking)
+  release_min_z: 0.03        # [m] release must happen above the table (box)
+  onset_joint_speed_deg_s: 5.0
+  onset_min_s: 0.2           # motion must be sustained this long to count as onset
+  keypoint_height: 0.03      # [m] pre-grasp / lift keypoints: z_contact + this
+  min_primitive_s: 0.5
+  quiet_release_tail_s: 0.3  # P2 end after a release without a detectable opening
+  output_csv: outputs/segmentation.csv
+
 inspection:
   output_report: docs/dataset_report.md
   figures_dir: docs/figures
