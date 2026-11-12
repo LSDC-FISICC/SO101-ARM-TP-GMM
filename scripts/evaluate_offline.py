@@ -277,14 +277,17 @@ def write_report(res: pd.DataFrame, cfg: dict, n_total: int, K: dict) -> None:
       f"{100 * (1 - (by['ik_planner'].ik_feasible == 1).mean()):.0f} % of its cycles contain an IK-infeasible point.")
     if "lpv_ds" in by:
         lp = by["lpv_ds"]
-        A(f"- **TP-GMM vs LPV-DS.** The stable DS reaches the cube as accurately (grasp error "
-          f"{lp.grasp_err_mm.median():.1f} vs {seg_.grasp_err_mm.median():.1f} mm) — the floor is vision and the "
-          "operator, not the policy — but reproduces the demonstrated path less closely (path deviation "
-          f"{lp.path_dev_mm.median():.0f} vs {seg_.path_dev_mm.median():.0f} mm): a first-order field of the position "
-          "cannot represent the arched approach (rise first, then descend) where the velocity depends on the phase, "
-          f"not only on the position. It runs at its own pace (duration error {lp.duration_err_s.median():+.2f} s "
-          "median). Its advantages are not visible in this offline test: convergence is guaranteed and it reacts "
-          "to the current state — see `perturbation_report.md`.")
+        pd_l, pd_s = lp.path_dev_mm.median(), seg_.path_dev_mm.median()
+        shape = ("follows the demonstrated path about as closely" if abs(pd_l - pd_s) < 2 else
+                 "follows the demonstrated path less closely" if pd_l > pd_s else
+                 "follows the demonstrated path more closely")
+        A(f"- **TP-GMM vs LPV-DS.** Grasp error {lp.grasp_err_mm.median():.1f} vs {seg_.grasp_err_mm.median():.1f} mm and "
+          f"release error {lp.release_err_mm.median():.1f} vs {seg_.release_err_mm.median():.1f} mm: no accuracy gain — the "
+          f"floor is vision and the operator, not the policy. The stable DS {shape} (time-free path deviation "
+          f"{pd_l:.0f} vs {pd_s:.0f} mm), with one velocity per position and no clock (duration error "
+          f"{lp.duration_err_s.median():+.2f} s median). Its advantages are not visible in this offline test: "
+          "convergence is guaranteed and it reacts to the current state — see `perturbation_report.md` (and the "
+          "path-shape caveat there: it sometimes approaches the cube from the far side).")
     A(f"- **Release:** no significant difference; all three are bounded by the spread of the demonstrated releases "
       "in the box (~2 cm), which the box frame cannot explain (the operator dropped the cube anywhere in it).")
     A(f"- **Cube-yaw choice (90° symmetry):** see the next section.")
