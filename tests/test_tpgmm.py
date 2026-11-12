@@ -177,3 +177,20 @@ def test_cube_symmetry_margin_and_ambiguity():
     assert len(ambiguous_candidates(np.radians(10), np.radians(52), np.radians(10))) == 2
     assert len(ambiguous_candidates(np.radians(10), np.radians(20), np.radians(10))) == 1
     assert heading_target(np.array([0.0, 0.2]), np.zeros(2), 0.1) == pytest.approx(np.pi / 2 + 0.1)
+
+
+def test_gmr_ds_recovers_a_linear_attractor():
+    from so101_tpgmm.tpgmm.ds import divergence, field, fit_ds, integrate
+
+    rng = np.random.default_rng(0)
+    A = np.array([[-1.0, 0.3], [-0.3, -1.0]])  # stable spiral to the origin, divergence -2
+    P = rng.uniform(-0.2, 0.2, (3000, 2))
+    V = P @ A.T + rng.normal(0, 1e-3, P.shape)
+    g, _ = fit_ds(P, V, k_range=(1, 2))
+    x = integrate(g, np.array([0.15, -0.1]), dt=0.02, T=8.0)
+    assert np.linalg.norm(x[-1]) < 0.01
+    xs = ys = np.linspace(-0.1, 0.1, 21)
+    XX, YY = np.meshgrid(xs, ys)
+    F = field(g, np.c_[XX.ravel(), YY.ravel()])
+    div = divergence(F[:, 0].reshape(XX.shape), F[:, 1].reshape(XX.shape), xs, ys)
+    assert np.median(div) == pytest.approx(-2.0, abs=0.1)

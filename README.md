@@ -195,6 +195,8 @@ so101_tpgmm/
     tpgmm.py                  TP-GMM: EM, inicialización k-means en el tiempo, BIC, reproducción
     demos.py                  demostraciones, marcos cubo/caja, simetría de 90° del cubo
     policy.py                 política segmentada / monolítica, continuidad entre primitivas
+    cube_symmetry.py          elección entre las 4 orientaciones equivalentes del cubo
+    ds.py                     sistema dinámico GMR-DS (campo vectorial) a partir de las demostraciones
   planner/ik_planner.py       planificador geométrico por waypoints (línea base)
   evaluation/metrics.py       métricas: RMSE, error de agarre/soltado, factibilidad IK
   inference.py                imagen → cubos → trayectorias → articulaciones (orden de colores)
@@ -209,6 +211,7 @@ scripts/
   train.py                    Fase 4: entrena TP-GMM segmentado, monolítico y el planificador por IK
   evaluate_offline.py         Fase 5: validación leave-one-out por ciclo y figuras
   infer.py                    Fase 5: imagen (o episodio) → .npz/.csv con la trayectoria articular
+  plot_ds_field.py            campo vectorial y divergencia del DS aprendido (diagnóstico)
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)
@@ -220,6 +223,7 @@ docs/
   cube_frames.csv             marco del cubo por ciclo (visión y FK), color y banderas
   tpgmm_report.md             entrenamiento, selección por BIC, componentes (generado)
   evaluation_report.md        comparación leave-one-out de los tres modelos (generado)
+  ds_field.md                 campo vectorial / divergencia del GMR-DS (generado)
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
 tests/                        pytest (34 tests)
