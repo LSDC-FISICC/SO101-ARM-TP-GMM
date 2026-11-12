@@ -24,7 +24,7 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 0b | Calibración de la cámara con la cuadrícula de cinta → [`docs/camera_calibration.md`](docs/camera_calibration.md) | ✅ preliminar |
 | 1 | Cinemática: FK desde el URDF e IK numérica (posición + yaw, límites, pitch suave) → [`docs/kinematics_report.md`](docs/kinematics_report.md) | ✅ |
 | 2 | Segmentación en ciclos y primitivas (approach+grasp, transport+release) con filtros físicos → [`docs/segmentation_report.md`](docs/segmentation_report.md) | ✅ |
-| 3 | Visión con la cámara fija (HSV, minAreaRect, yaw plegado, homografía) | pendiente |
+| 3 | Visión con la cámara fija: detección HSV, yaw plegado, homografía con RANSAC, validación de escena → [`docs/vision_report.md`](docs/vision_report.md) | ✅ |
 | 4 | TP-GMM en numpy (EM + GMR con producto de Gaussianas, BIC) y, en paralelo, planificador por IK sobre las mismas primitivas | pendiente |
 | 5 | Evaluación leave-one-out, inferencia desde imagen y stub del robot | pendiente |
 
@@ -155,12 +155,19 @@ so101_tpgmm/
   vision/
     camera_pose.py            homografía con offset del cubo, descomposición, chequeo de espejo
     grid_calibration.py       bordes subpíxel de la cinta y ajuste punto-a-recta
+    detection.py              detección de cubos por color (HSV), minAreaRect, yaw plegado a ±45°
+    geometry.py               píxel → base (homografía, yaw por la homografía, distorsión opcional)
+    calibration.py            homografía con RANSAC desde el propio dataset
+    scene.py                  frame de referencia, validación de escena, asociación ciclo↔cubo
+    draw.py                   dibujos de depuración
   tpgmm/, robot/              (fases siguientes)
 scripts/
   inspect_dataset.py          Fase 0: reporte, figuras y CSV por episodio
   calibrate_camera_grid.py    calibración métrica con la cuadrícula
   check_kinematics.py         Fase 1: ida y vuelta FK→IK, trayectorias grabadas, mapa de alcance
   segment_dataset.py          Fase 2: tabla de ciclos/primitivas, reporte y figuras
+  vision_pipeline.py          Fase 3: detección, calibración, marcos del cubo por ciclo, reporte
+  debug_detections.py         imágenes con las detecciones dibujadas (episodios o cualquier imagen)
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)
@@ -168,6 +175,8 @@ docs/
   kinematics_paper_review.md  revisión de la cinemática de Rivas (2026) contra el URDF
   segmentation_report.md      segmentación en primitivas (generado)
   segmentation_cycles.csv     un registro por ciclo: índices, banderas y puntos clave
+  vision_report.md            visión y calibración píxel→base (generado)
+  cube_frames.csv             marco del cubo por ciclo (visión y FK), color y banderas
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
 tests/                        pytest (34 tests)
