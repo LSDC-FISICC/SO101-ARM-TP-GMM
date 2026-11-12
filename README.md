@@ -387,6 +387,7 @@ scripts/
   run_sac_real.py             SAC en el robot real: despliegue y ajuste fino
   act/train_act_spark.sh      entrena ACT (LeRobot) en la Spark: preset constante (A) o warm-up + coseno (B)
   act/eval_act_offline.py     evaluación offline de ACT en los 40 episodios reservados
+  act/lerobot_train_wandb.py  lerobot-train con registro en Weights & Biases (LeRobot 0.7 solo usa Trackio)
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)

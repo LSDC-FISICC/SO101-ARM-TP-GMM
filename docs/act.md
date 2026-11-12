@@ -14,9 +14,18 @@ its leave-one-out evaluation (`evaluation_report.md`).
 ## Training (DGX Spark)
 
 ```bash
-bash scripts/act/train_act_spark.sh A   # ACT preset: AdamW, constant lr 1e-5
-bash scripts/act/train_act_spark.sh B   # linear warm-up (2 k) + cosine decay, peak 3e-5 → 3e-6
+pip install 'lerobot[dataset,training]==0.7.0' wandb trackio
+wandb login                              # once; optionally export WANDB_ENTITY=<team>
+export HF_USER=<your Hugging Face user>
+bash scripts/act/train_act_spark.sh A    # ACT preset: AdamW, constant lr 1e-5
+bash scripts/act/train_act_spark.sh B    # linear warm-up (2 k) + cosine decay, peak 3e-5 → 3e-6
 ```
+
+**Logging:** LeRobot ≥ 0.6 logs only to Trackio; `scripts/act/lerobot_train_wandb.py` runs the same
+`lerobot-train` with a stand-in `trackio` module that forwards to Weights & Biases (project
+`so101-act`, runs `act_dataset3_const-…` and `act_dataset3_cosine-…`): loss, L1 and KL terms, gradient
+norm, learning rate, samples/epochs, data-loading time. `LOGGER=trackio` uses LeRobot's own logger
+instead; `LEROBOT_ALSO_TRACKIO=1` logs to both. Checked with a 4-step CPU run (W&B offline mode).
 
 Both: batch 32, 100 k steps (≈ 15 epochs of the 215 k training frames), chunk 100, image
 augmentation on, same seed; only the learning-rate schedule differs.
@@ -33,8 +42,7 @@ augmentation on, same seed; only the learning-rate schedule differs.
   (`training-record2`, 20 episodes, "Grasp green cube") for 25 k steps at batch 8 (200 k samples, less
   than one epoch of dataset3): it is not a dataset3 policy. On two held-out episodes it is worse than
   not moving (TCP error 70–90 mm vs 10–35 mm), as expected.
-- **Environment:** LeRobot 0.7.0 (`pip install 'lerobot[dataset]==0.7.0'`) in a Python environment
-  whose PyTorch sees the Spark's GPU; check `python -c "import torch; print(torch.cuda.is_available())"`
+- **Environment:** LeRobot 0.7.0 in a Python environment whose PyTorch sees the Spark's GPU; check `python -c "import torch; print(torch.cuda.is_available())"`
   after installing (pip may replace a CUDA build by a CPU one). Videos are AV1: `pyav` decodes them
   with dav1d; if data loading is the bottleneck (GPU utilization low), raise `WORKERS`.
 

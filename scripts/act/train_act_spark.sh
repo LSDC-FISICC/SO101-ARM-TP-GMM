@@ -7,7 +7,9 @@
 #
 # Both variants are identical except for the learning-rate schedule (same split, batch, steps, image
 # augmentation, seed), so the offline evaluation isolates its effect. Environment: HF_USER (Hub user
-# for the pushed policy), STEPS (default 100000), BATCH (default 32), WORKERS (default 12).
+# for the pushed policy), STEPS (default 100000), BATCH (default 32), WORKERS (default 12),
+# LOGGER = wandb (default: Weights & Biases through scripts/act/lerobot_train_wandb.py; run `wandb login`
+# once, optionally export WANDB_ENTITY) or trackio (LeRobot's own logger), PROJECT (default so101-act).
 set -euo pipefail
 VARIANT=${1:?usage: train_act_spark.sh A|B}
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -15,6 +17,8 @@ STEPS=${STEPS:-100000}
 BATCH=${BATCH:-32}
 WORKERS=${WORKERS:-12}
 HF_USER=${HF_USER:?set HF_USER to your Hugging Face user}
+LOGGER=${LOGGER:-wandb}
+PROJECT=${PROJECT:-so101-act}
 EPISODES=$(python -c "import json; print(json.dumps(json.load(open('$ROOT/configs/act_split.json'))['train']).replace(' ', ''))")
 
 COMMON=(
@@ -32,6 +36,7 @@ COMMON=(
   --save_freq=10000
   --seed=1000
   --trackio.enable=true
+  --trackio.project="$PROJECT"
   --policy.push_to_hub=true
 )
 
@@ -57,5 +62,11 @@ case "$VARIANT" in
   *) echo "variant must be A or B" >&2; exit 2 ;;
 esac
 
-lerobot-train "${COMMON[@]}" "${EXTRA[@]}" \
+case "$LOGGER" in
+  wandb) TRAIN=(python "$ROOT/scripts/act/lerobot_train_wandb.py") ;;   # LeRobot >= 0.6 only logs to Trackio
+  trackio) TRAIN=(lerobot-train) ;;
+  *) echo "LOGGER must be wandb or trackio" >&2; exit 2 ;;
+esac
+
+"${TRAIN[@]}" "${COMMON[@]}" "${EXTRA[@]}" \
   --output_dir="outputs/train/$NAME" --job_name="$NAME" --policy.repo_id="$HF_USER/$NAME"
