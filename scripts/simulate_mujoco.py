@@ -37,10 +37,11 @@ import pandas as pd  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from so101_tpgmm.config import load_config, resolve_path  # noqa: E402
-from so101_tpgmm.policies import POLICIES  # noqa: E402
+from so101_tpgmm.policies import POLICIES, RL_POLICIES  # noqa: E402
 
 LABEL = {"segmented": "TP-GMM segmented", "monolithic": "TP-GMM monolithic", "ik_planner": "IK planner",
-         "lpv_ds": "LPV-DS"}
+         "lpv_ds": "LPV-DS", "sac_scratch": "SAC from scratch", "sac_residual": "SAC residual on TP-GMM"}
+ALL = POLICIES + RL_POLICIES
 _W: dict = {}
 
 
@@ -228,7 +229,7 @@ def reading(df: pd.DataFrame, s: pd.DataFrame) -> list[str]:
         except KeyError:
             return float("nan")
 
-    pols = [p for p in POLICIES if p in set(df.policy)]
+    pols = [p for p in ALL if p in set(df.policy)]
     conds = [(sl, m) for sl in (False, True) for m in ("contact", "assist") if (sl, m, pols[0]) in s.index]
     mean = {p: float(np.nanmean([v(sl, m, p) for sl, m in conds])) for p in pols}
     wins = {p: sum(v(sl, m, p) >= max(v(sl, m, q) for q in pols) for sl, m in conds) for p in pols}
@@ -259,6 +260,20 @@ def reading(df: pd.DataFrame, s: pd.DataFrame) -> list[str]:
                    f"{v(False, 'contact', 'segmented', 'cubes lifted'):.0f} % for the segmented model, consistent with the "
                    "offline finding that, without the primitive boundary, its gripper closes ~0.5 s away from the "
                    "demonstrated contact (`evaluation_report.md`).")
+    if "sac_residual" in pols and "segmented" in pols:
+        from scipy.stats import binomtest
+
+        d0 = df[(df.noise_mm == 0) & (~df.slots) & (df.grasp_mode == "contact")]
+        a = d0[d0.policy == "segmented"].set_index(["seed", "cube"]).in_box
+        b = d0[d0.policy == "sac_residual"].set_index(["seed", "cube"]).in_box
+        w, lo = int((b & ~a).sum()), int((a & ~b).sum())
+        pv = binomtest(w, w + lo).pvalue if w + lo else 1.0
+        out.append(f"- **SAC residual vs TP-GMM** (same layouts, contact, one release point): delivered "
+                   f"{v(False, 'contact', 'sac_residual', 'delivered'):.0f} vs {v(False, 'contact', 'segmented', 'delivered'):.0f} %, "
+                   f"in the box {v(False, 'contact', 'sac_residual'):.0f} vs {v(False, 'contact', 'segmented'):.0f} % "
+                   f"(residual better on {w} cubes, worse on {lo}; p = {pv:.2g}); with grasp assist the difference "
+                   "reverses: equivalent within these 90 cubes. The residual ignores box slots (it observes a fixed "
+                   "release point), hence its unchanged numbers with slots.")
     gains = {p: v(True, "contact", p) - v(False, "contact", p) for p in pols}
     out.append("- **One release point vs box slots:** with every cube released at the same spot they pile up and some fall "
                "out; shifting the box frame per cube (a task parameter changed at execution, never varied in the "
@@ -290,7 +305,7 @@ def write_report(df: pd.DataFrame, cfg: dict, args) -> None:
     # outcome map per policy: rows = without / with box slots, in the first grasp mode
     m = "contact" if "contact" in set(df.grasp_mode) else df.grasp_mode.iloc[0]
     rows_sl = [sl for sl in (False, True) if sl in set(df.slots)]
-    pols = [p for p in POLICIES if p in set(df.policy)]
+    pols = [p for p in ALL if p in set(df.policy)]
     fig, axs = plt.subplots(len(rows_sl), len(pols), figsize=(4.2 * len(pols), 4.4 * len(rows_sl)), squeeze=False)
     bc, bi = np.asarray(cfg["sim"]["box"]["center_xy"]), np.asarray(cfg["sim"]["box"]["inner"]) / 2
     for r, sl in enumerate(rows_sl):
@@ -410,7 +425,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=None)
     ap.add_argument("--set", nargs="*", default=[])
-    ap.add_argument("--policies", nargs="*", default=list(POLICIES), choices=list(POLICIES))
+    ap.add_argument("--policies", nargs="*", default=list(POLICIES), choices=list(ALL))
     ap.add_argument("--episodes", type=int, default=30)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--grasp-modes", nargs="*", default=["contact", "assist"], choices=["contact", "assist"])

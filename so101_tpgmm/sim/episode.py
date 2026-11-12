@@ -150,6 +150,17 @@ def in_box(spec: SceneSpec, p: np.ndarray, footprint: bool = False) -> bool:
     return bool(inside if footprint else inside and loc[2] < spec.box_wall_h + spec.cube_side)  # stacked counts
 
 
+def _score(oc: CubeOutcome, spec: SceneSpec, i: int, start: np.ndarray, cubes_xyz: np.ndarray,
+           closed: np.ndarray) -> None:
+    """Lifted / held at release / released over the box, from the cube track and the gripper commands."""
+    z = cubes_xyz[:, i, 2]
+    oc.lifted = bool(np.any((z - start[2] > 0.03) & closed))
+    k_rel = release_index(closed)
+    if k_rel is not None:
+        oc.held_at_release = bool(z[k_rel] - start[2] > 0.03)
+        oc.released_over_box = bool(oc.held_at_release and in_box(spec, cubes_xyz[k_rel, i], footprint=True))
+
+
 def run_episode(policy, ik: SO101IK, cfg: dict, spec: SceneSpec, geom: FingerGeometry, rng: np.random.Generator,
                 noise_mm: float = 0.0, grasp_mode: str = "contact", render: tuple[int, int] | None = None,
                 camera=None, render_every: int = 2, frame_callback=None,
@@ -186,6 +197,18 @@ def run_episode(policy, ik: SO101IK, cfg: dict, spec: SceneSpec, geom: FingerGeo
         q_deg, g = sim.joints_deg_gripper()
         target = heading_target(now[:2], np.asarray(policy.meta["pan_xy"]), policy.meta["heading_offset"])
         options = ambiguous_candidates(cube.yaw, target, np.deg2rad(icfg.get("ambiguity_margin_deg", 10.0)))
+        if hasattr(policy, "run_cube"):  # closed-loop RL policy (SAC): acts on the measured state
+            obs = now.copy()
+            if noise_mm > 0:
+                obs[:2] += rng.normal(0, noise_mm * 1e-3, 2)
+            qs, gs, traj, fr, oc.cycle_s = policy.run_cube(sim, spec, i, obs, cube.yaw, options[0], ik, geom,
+                                                            render_every=render_every)
+            q_end, g_end = sim.joints_deg_gripper()
+            qh, gh = joint_move(q_end, home, g_end, g_home, float(icfg["return_home_s"]), dt)
+            back = sim.execute(qh[1:], gh[1:], dt, render_every=render_every)
+            _score(oc, spec, i, now, np.concatenate([traj, back.cubes_xyz]), np.r_[gs, gh[1:]] < sim.open_threshold)
+            frames += fr + back.frames
+            continue
         best = None
         for h in options:
             p, res_err = policy_input(policy, ik, geom, spec, cube_now, h, q_deg, g, cfg)
@@ -204,14 +227,7 @@ def run_episode(policy, ik: SO101IK, cfg: dict, spec: SceneSpec, geom: FingerGeo
         qs, gs = np.rad2deg(res.q), np.clip(ro.Y[:, ro.names.index("g")], 0, 100)
         qh, gh = joint_move(qs[-1], home, gs[-1], g_home, float(icfg["return_home_s"]), dt)
         out = sim.execute(np.vstack([qs, qh[1:]]), np.r_[gs, gh[1:]], dt, render_every=render_every)
-        z = out.cubes_xyz[:, i, 2]
-        g_all = np.r_[gs, gh[1:]]
-        closed = g_all < sim.open_threshold
-        oc.lifted = bool(np.any((z - now[2] > 0.03) & closed))
-        k_rel = release_index(closed)
-        if k_rel is not None:
-            oc.held_at_release = bool(z[k_rel] - now[2] > 0.03)
-            oc.released_over_box = bool(oc.held_at_release and in_box(spec, out.cubes_xyz[k_rel, i], footprint=True))
+        _score(oc, spec, i, now, out.cubes_xyz, np.r_[gs, gh[1:]] < sim.open_threshold)
         oc.cycle_s = float(len(qs) * dt)
         frames += out.frames
     end = sim.cube_positions()

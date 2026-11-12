@@ -14,6 +14,11 @@ tape-grid estimate (see ``scripts/simulate_mujoco.py --fit-table``). Cubes and b
 The box is an open container centred on the median demonstrated release point; its size was not
 measured (``sim.box`` in the config, chosen to hold the release spread without overlapping any
 demonstrated grasp).
+
+Integration: 0.5 ms steps. With 2 ms, a finger tip pressing a light cube into the table (full servo
+torque on a 20-60 g cube) let it sink several mm and then spin out of the simulation in ~1/3 of the
+episodes with noisy RL actions; at 0.5 ms none in the same test (physics stays ~10x cheaper than the
+IK per control step). The table is a plane (a tilted box table gave single-point edge contacts).
 """
 
 from __future__ import annotations
@@ -102,7 +107,7 @@ def scene_xml(spec: SceneSpec) -> str:
     Rt = spec.table_rotation()
     qt = _quat(Rt)
     tz0 = spec.table_height(0.25, 0.0)
-    table_c = np.array([0.25, 0.0, tz0]) - Rt[:, 2] * 0.01
+    tz_c = np.array([0.25, 0.0, tz0])  # a plane: robust contacts (a tilted box table made cubes resting on an edge explode)
     walls = [((ix + t / 2, 0, wh), (t / 2, iy + t, wh)), ((-ix - t / 2, 0, wh), (t / 2, iy + t, wh)),
              ((0, iy + t / 2, wh), (ix, t / 2, wh)), ((0, -iy - t / 2, wh), (ix, t / 2, wh))]
     box = "\n".join(f'      <geom type="box" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" size="{s[0]:.4f} {s[1]:.4f} {s[2]:.4f}" '
@@ -123,7 +128,7 @@ def scene_xml(spec: SceneSpec) -> str:
         cam = f'    <camera name="fixed" pos="{" ".join(map(str, spec.camera["pos"]))}" xyaxes="{" ".join(map(str, spec.camera["xyaxes"]))}"/>'
     return f"""<mujoco model="so101_pick_place">
   <include file="{spec.robot_xml.name}"/>
-  <option timestep="0.002" integrator="implicitfast" cone="elliptic" impratio="10"/>
+  <option timestep="0.0005" integrator="implicitfast" cone="elliptic" impratio="10"/>
   <visual>
     <headlight diffuse="0.6 0.6 0.6" ambient="0.35 0.35 0.35" specular="0 0 0"/>
     <global offwidth="1280" offheight="960"/>
@@ -139,7 +144,7 @@ def scene_xml(spec: SceneSpec) -> str:
   </asset>
   <worldbody>
     <light pos="0.2 0 1.2" dir="0 0 -1" directional="true" diffuse="0.5 0.5 0.5"/>
-    <geom name="table" type="box" pos="{table_c[0]:.5f} {table_c[1]:.5f} {table_c[2]:.5f}" quat="{qt}" size="0.45 0.45 0.01" material="table" class="env"/>
+    <geom name="table" type="plane" pos="{tz_c[0]:.5f} {tz_c[1]:.5f} {tz_c[2]:.5f}" quat="{qt}" size="0.45 0.45 0.01" material="table" class="env"/>
     <body name="box" pos="{cx:.5f} {cy:.5f} {spec.table_height(cx, cy):.5f}" quat="{qt}">
 {box}
     </body>
