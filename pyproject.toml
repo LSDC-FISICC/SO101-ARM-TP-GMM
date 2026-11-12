@@ -26,6 +26,7 @@ dev = ["pytest>=7"]
 robot = ["lerobot"]       # only needed on the machine connected to the SO-101
 sim = ["mujoco>=3.2"]     # MuJoCo simulation (scripts/simulate_mujoco.py)
 rl = ["mujoco>=3.2", "gymnasium>=1.0", "stable-baselines3>=2.3", "torch>=2.2"]  # SAC (scripts/train_sac.py)
+act = ["lerobot[dataset]==0.7.0"]  # ACT evaluation (scripts/act/)
 
 [tool.setuptools.packages.find]
 include = ["so101_tpgmm*"]
