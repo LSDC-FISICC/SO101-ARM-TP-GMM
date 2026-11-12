@@ -154,7 +154,7 @@ class DSController:
             X.append(state[:3].copy()), G.append(state[4])
             if self.policy.distance("approach_grasp", state, frames["approach_grasp"]) < self.policy.meta["end_tolerance"]:
                 for _ in range(int(self.policy.meta["settle_s"] / DT)):  # gripper closes in place
-                    g = self.policy.prims["approach_grasp"].gripper_at(0.0)
+                    g = self.policy.prims["approach_grasp"].gripper_on_arrival()
                     state[4] += np.clip(g - state[4], -DT * 200, DT * 200)
                     X.append(state[:3].copy()), G.append(state[4])
                 break
@@ -226,10 +226,18 @@ def main() -> None:
                         nominal["pt"] = X[ig]
                     ref_pt = nominal["pt"]
                 dev = float(np.linalg.norm(X[ig] - ref_pt))
+                phi_f = lpv.frames(cube_final, yaw)[0]["approach_grasp"][1]
+                overshoot = float(((X[: ig + 1] - cube_final) @ rot_z(phi_f))[:, 0].max())  # beyond the cube, outward
                 rows.append(dict(cycle=int(r.episode), controller=cname, scenario=sname, deviation_mm=dev * 1e3,
-                                 success=dev < 0.010, time_to_grasp_s=ig * DT, peak_cmd_speed=umax))
+                                 success=dev < 0.010, time_to_grasp_s=ig * DT, peak_cmd_speed=umax,
+                                 overshoot_cm=overshoot * 100))
                 if i == 0:
-                    examples[(cname, sname)] = (X, ig, cube_final)
+                    phi_c = lpv.frames(cube_final, yaw)[0]["approach_grasp"][1]
+                    examples[(cname, sname)] = (X, ig, cube_final, phi_c)
+    for i, d in enumerate(demos["approach_grasp"]):  # same statistic for the demonstrations
+        Lc = (d.X[:, 1:4] - d.cube[:3]) @ rot_z(d.cube[3])
+        rows.append(dict(cycle=int(sub.episode[i]), controller="demonstration", scenario="nominal",
+                         overshoot_cm=float(Lc[:, 0].max() * 100)))
     res = pd.DataFrame(rows)
     out = resolve_path("outputs/evaluation")
     out.mkdir(parents=True, exist_ok=True)
@@ -242,6 +250,8 @@ def main() -> None:
 def write_report(res, examples, r0, seg, args, v_max, T_med) -> None:
     fig_dir = resolve_path("docs/figures")
     plt.rcParams.update({"axes.grid": True, "grid.alpha": 0.3})
+    demo_rows = res[res.controller == "demonstration"]
+    res = res[res.controller != "demonstration"]
     ctrl = list(dict.fromkeys(res.controller))
     colors = {"TP-GMM segmented": "#3b6ea5", "IK planner": "#2a9d4b", "LPV-DS": "#c03b3b",
               "TP-GMM + phase stopping": "#8e5ab5"}
@@ -249,15 +259,15 @@ def write_report(res, examples, r0, seg, args, v_max, T_med) -> None:
     axs = axs.ravel()
     for ax, s in zip(axs, SCENARIOS):
         for c in ctrl:
-            X, ig, cube = examples[(c, s)]
-            phi = 0.0
-            ax.plot(np.linalg.norm(X[:, :2] - cube[:2], axis=1) * 100 * np.sign(X[:, 0] - cube[0] + 1e-9) * -1,
-                    X[:, 2] * 100, c=colors[c], label=c)
-            ax.plot(-np.linalg.norm(X[ig, :2] - cube[:2]) * 100 * np.sign(X[ig, 0] - cube[0] + 1e-9), X[ig, 2] * 100,
-                    "o", c=colors[c], ms=6)
-        ax.plot(0, cube[2] * 100, "s", c="orange", ms=9)
-        ax.set_title(s, fontsize=10); ax.set_xlabel("signed horizontal distance to the cube [cm]")
-    axs[0].set_ylabel("TCP z [cm]"); axs[0].legend(fontsize=7)
+            X, ig, cube, phi = examples[(c, s)]
+            Lc = (X - cube) @ rot_z(phi)  # cube frame (x outward from the robot)
+            ax.plot(Lc[:, 0] * 100, Lc[:, 2] * 100, c=colors[c], label=c)
+            ax.plot(Lc[ig, 0] * 100, Lc[ig, 2] * 100, "o", c=colors[c], ms=6)
+        ax.plot(0, 0, "s", c="orange", ms=9)
+        ax.set_title(s, fontsize=10); ax.set_xlabel("cube-frame x [cm] (final cube)")
+    for ax in axs[::3]:
+        ax.set_ylabel("cube-frame z [cm]")
+    axs[0].legend(fontsize=7)
     fig.suptitle(f"Approach of episode {int(r0.episode)} under each perturbation (dot = gripper closes)", fontsize=10)
     fig.tight_layout(); fig.savefig(fig_dir / "perturbation_example.png", dpi=100); plt.close(fig)
 
@@ -298,7 +308,45 @@ def write_report(res, examples, r0, seg, args, v_max, T_med) -> None:
             x = res[(res.controller == c) & (res.scenario == s)]
             L.append(f"| {s} | {c} | {x.deviation_mm.median():.1f} | {x.deviation_mm.quantile(0.9):.1f} | "
                      f"{100 * x.success.mean():.0f} % | {x.time_to_grasp_s.median():.2f} | {x.peak_cmd_speed.median():.2f} |")
-    L += ["", "![](figures/perturbation_summary.png)\n", "![](figures/perturbation_example.png)\n"]
+    def med(c, sc, col="deviation_mm"):
+        return res[(res.controller == c) & (res.scenario == sc)][col].median()
+
+    def succ(c, sc):
+        return 100 * res[(res.controller == c) & (res.scenario == sc)].success.mean()
+
+    tp, pl, ds_, ph = "TP-GMM segmented", "IK planner", "LPV-DS", "TP-GMM + phase stopping"
+    L += ["", "## Reading\n",
+          f"- **Time-indexed tracking with feedback handles most perturbations.** With Kp = {args.kp} 1/s and "
+          "online replanning when the cube moves, the TP-GMM recovers from start offsets, pushes, moved cubes and a "
+          "slower robot before its gripper closes (100 % success).",
+          f"- **Its failure mode is timing.** After a 2 s stall late in the approach, the reference — and the gripper "
+          f"closing tied to its clock — has moved on: the jaws close {med(tp, 'stall_2s_late'):.0f} mm (TP-GMM) and "
+          f"{med(pl, 'stall_2s_late'):.0f} mm (IK planner) away from the grasp ({succ(tp, 'stall_2s_late'):.0f} % / "
+          f"{succ(pl, 'stall_2s_late'):.0f} % success). Catching up after a 1 s stall also demands bursts of speed "
+          f"({med(tp, 'stall_1s', 'peak_cmd_speed'):.2f} / {med(pl, 'stall_1s', 'peak_cmd_speed'):.2f} m/s commanded "
+          f"vs {med(tp, 'nominal', 'peak_cmd_speed'):.2f} nominal).",
+          f"- **LPV-DS is immune to timing** (stall: {med(ds_, 'stall_2s_late'):.1f} mm, {succ(ds_, 'stall_2s_late'):.0f} % "
+          "success): it has no clock, it reacts to the current state and closes on arrival. Its deviations elsewhere "
+          f"(≤ {max(med(ds_, s_) for s_ in SCENARIOS):.1f} mm median) come from the arrival tolerance.",
+          f"- **Phase stopping gives the TP-GMM the same immunity** ({med(ph, 'stall_2s_late'):.1f} mm, "
+          f"{succ(ph, 'stall_2s_late'):.0f} % success) without changing the model, and removes the catch-up bursts "
+          f"({med(ph, 'stall_1s', 'peak_cmd_speed'):.2f} m/s after a 1 s stall).",
+          "- **Conclusion:** the LPV-DS does not improve accuracy (see `evaluation_report.md`) and its robustness "
+          "advantage over the TP-GMM is limited to timing disturbances, which phase stopping also solves. Its "
+          "remaining benefit is the convergence guarantee from any state (e.g. far outside the demonstrations), "
+          "which this benchmark does not stress.",
+          "- **Path shape (nominal runs):** how far past the cube the approach goes (cube-frame x, outward from the "
+          "robot) before the grasp — p90 / share of cycles beyond 2 cm: "
+          + "; ".join(f"{c} {res[(res.controller == c) & (res.scenario == 'nominal')].overshoot_cm.quantile(0.9):.1f} cm / "
+                      f"{100 * (res[(res.controller == c) & (res.scenario == 'nominal')].overshoot_cm > 2).mean():.0f} %"
+                      for c in ctrl)
+          + f"; demonstrations {demo_rows.overshoot_cm.quantile(0.9):.1f} cm / "
+          f"{100 * (demo_rows.overshoot_cm > 2).mean():.0f} %. The LPV-DS's rotational component sometimes carries "
+          "the arm over the cube and down from the far side (see the example below) — stable, but not how the "
+          "operator approached.",
+          "- Caveats: kinematic simulation of the TCP (no dynamics, no joint limits, no contact); the real "
+          "robot adds servo lag and backlash.",
+          "", "![](figures/perturbation_summary.png)\n", "![](figures/perturbation_example.png)\n"]
     resolve_path("docs/perturbation_report.md").write_text("\n".join(L) + "\n", encoding="utf-8")
 
 

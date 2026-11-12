@@ -47,23 +47,31 @@ class PrimitiveDS:
     v_max: float
     median_duration: float
     v_min: float = 0.0  # speed floor near the target (demonstrated median speed 5-30 mm from the end)
+    g_final: float | None = None  # gripper command on arrival: median demonstrated final value (hold / release)
 
     def to_dict(self) -> dict:
         return {"pos": self.pos.to_dict(), "heading": [self.heading.log_gain.tolist(), self.heading.target],
                 "pitch": [self.pitch.log_gain.tolist(), self.pitch.target],
                 "gripper": [self.gripper.priors.tolist(), self.gripper.means.tolist(), self.gripper.covs.tolist()],
-                "v_max": self.v_max, "median_duration": self.median_duration, "v_min": self.v_min}
+                "v_max": self.v_max, "median_duration": self.median_duration, "v_min": self.v_min,
+                "g_final": self.g_final}
 
     @classmethod
     def from_dict(cls, d: dict) -> "PrimitiveDS":
         g = d["gripper"]
         return cls(LPVDS.from_dict(d["pos"]), ScalarDS(np.array(d["heading"][0]), d["heading"][1]),
                    ScalarDS(np.array(d["pitch"][0]), d["pitch"][1]), GMM(np.array(g[0]), np.array(g[1]), np.array(g[2])),
-                   d["v_max"], d["median_duration"], d.get("v_min", 0.0))
+                   d["v_max"], d["median_duration"], d.get("v_min", 0.0), d.get("g_final"))
 
     def gripper_at(self, dist: float) -> float:
         m, _ = gmr(self.gripper, np.array([[dist]]), [0], [1])
         return float(m[0, 0])
+
+    def gripper_on_arrival(self) -> float:
+        """Value commanded once the attractor is reached. Not g(0) of the smooth map: near the contact the
+        demonstrations mix still-open and already-closed jaws, and the regression averages them (~43
+        instead of the ~20 holding level)."""
+        return self.g_final if self.g_final is not None else self.gripper_at(0.0)
 
 
 def fit_primitive(demos: list[Demo], name: str, K: int | None = None) -> tuple[PrimitiveDS, dict]:
@@ -90,7 +98,9 @@ def fit_primitive(demos: list[Demo], name: str, K: int | None = None) -> tuple[P
     near = (dist > 0.005) & (dist < 0.03)
     v_min = float(np.median(np.linalg.norm(V[near], axis=1))) if near.any() else 0.0
     info.update(target=target.tolist())
-    return PrimitiveDS(model, heading, pitch, gm, v_max, float(np.median([d.duration for d in demos])), v_min), info
+    g_final = float(np.median([d.X[-1, 5] for d in demos]))
+    return (PrimitiveDS(model, heading, pitch, gm, v_max, float(np.median([d.duration for d in demos])), v_min, g_final),
+            info)
 
 
 class GripperLatch:
@@ -188,7 +198,7 @@ class LPVDSPolicy:
                 if latch is not None:
                     g = latch(g)
                 if settle is not None:  # arrived: stop and actuate the gripper (close / open)
-                    v, hd, td, g = np.zeros(3), 0.0, 0.0, p.gripper_at(0.0)
+                    v, hd, td, g = np.zeros(3), 0.0, 0.0, p.gripper_on_arrival()
                 state[:3] += dt * v
                 state[3] += dt * hd
                 state[5] += dt * td
