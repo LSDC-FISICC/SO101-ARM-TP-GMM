@@ -39,7 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from so101_tpgmm.config import load_config, resolve_path  # noqa: E402
 from so101_tpgmm.data.lerobot_dataset import LeRobotV3Dataset  # noqa: E402
-from so101_tpgmm.evaluation.metrics import cycle_metrics, ik_feasibility  # noqa: E402
+from so101_tpgmm.evaluation.metrics import cycle_metrics, demo_cycle, ik_feasibility, path_deviation, retime  # noqa: E402
+from so101_tpgmm.lpvds.policy import LPVDSPolicy  # noqa: E402
 from so101_tpgmm.kinematics.fk import SO101Kinematics  # noqa: E402
 from so101_tpgmm.kinematics.ik import ik_from_config  # noqa: E402
 from so101_tpgmm.tpgmm.cube_symmetry import decision_margin, heading_target  # noqa: E402
@@ -47,7 +48,7 @@ from so101_tpgmm.tpgmm.demos import build_demos, canonical_cube_yaw, choose_cube
 from so101_tpgmm.tpgmm.policy import TPGMMPolicy  # noqa: E402
 from train import fit_policies  # noqa: E402
 
-MODELS = ("segmented", "monolithic", "ik_planner")
+MODELS = ("segmented", "monolithic", "ik_planner", "lpv_ds")
 _G: dict = {}
 
 
@@ -63,6 +64,14 @@ def _init(cfg_args: tuple) -> None:
     seg = TPGMMPolicy.load(mdir / "segmented.json")
     mono = TPGMMPolicy.load(mdir / "monolithic.json")
     _G["K"] = {**{p: m.n_components for p, m in seg.models.items()}, "cycle": mono.models["cycle"].n_components}
+    lpv = mdir / "lpv_ds.json"
+    _G["K_lpv"] = ({p: int(v["K"]) for p, v in LPVDSPolicy.load(lpv).meta["fit_info"].items()} if lpv.exists()
+                   else {"approach_grasp": 8, "transport_release": 8})
+
+
+def _init_worker(cfg_args: tuple, models: list[str]) -> None:
+    _init(cfg_args)
+    _G["models"] = models
 
 
 def run_fold(i: int) -> list[dict]:
@@ -74,6 +83,7 @@ def run_fold(i: int) -> list[dict]:
     dA, dT = hd["approach_grasp"][0], hd["transport_release"][0]
     t0 = time.time()
     seg, mono, planner, _ = fit_policies(demos, ctx, cfg, k_fixed=_G["K"])
+    lpv = LPVDSPolicy.fit(demos, ctx, k_fixed=_G["K_lpv"]) if "lpv_ds" in _G.get("models", MODELS) else None
     fit_s = time.time() - t0
     r = held.iloc[0]
     cube = np.array([r.vision_x, r.vision_y, r.vision_z])
@@ -84,12 +94,19 @@ def run_fold(i: int) -> list[dict]:
     _, k_true = canonical_cube_yaw(float(r.vision_yaw), float(dA.cube[3]))
     margin = decision_margin(float(r.vision_yaw), heading_target(cube[:2], np.asarray(ctx["pan_xy"]), ctx["heading_offset"]))
     rows = []
-    for name, pol in (("segmented", seg), ("monolithic", mono), ("ik_planner", planner)):
+    _, Yd = demo_cycle(dA, dT)
+    pols = [("segmented", seg), ("monolithic", mono), ("ik_planner", planner), ("lpv_ds", lpv)]
+    for name, pol in [p for p in pols if p[0] in _G.get("models", MODELS)]:
         ro = pol.rollout(cube, float(r.vision_yaw), start=start, durations=durs)
-        m = cycle_metrics(ro, dA, dT, monolithic=(name == "monolithic"))
+        own_duration = float(ro.t[-1])
+        ro_m = retime(ro, [dA.duration, dT.duration]) if name == "lpv_ds" else ro  # DS has no clock
+        m = cycle_metrics(ro_m, dA, dT, monolithic=(name == "monolithic"))
+        m["path_dev_mm"] = path_deviation(ro.Y[:, :3], Yd[:, :3]) * 1e3
+        m["duration_err_s"] = own_duration - (dA.duration + dT.duration)
         m.update(ik_feasibility(ro, ik, q0))
         # oracle: the equivalent cube yaw the operator actually used (upper bound for any choice rule)
         ro_o = pol.rollout(cube, float(r.vision_yaw), start=start, durations=durs, heading=float(dA.cube[3]))
+        ro_o = retime(ro_o, [dA.duration, dT.duration]) if name == "lpv_ds" else ro_o
         mo = cycle_metrics(ro_o, dA, dT, monolithic=(name == "monolithic"))
         m.update({f"{k}_oracle_k": mo[k] for k in ("grasp_err_mm", "rmse_pos_mm", "grasp_heading_err_deg")})
         m["k_margin_deg"] = float(np.degrees(margin))
@@ -114,10 +131,12 @@ def main() -> None:
     ap.add_argument("--folds", default=None, help="number of held-out cycles or 'all'")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--report-only", action="store_true", help="rewrite the report from loo_results.csv")
+    ap.add_argument("--models", nargs="*", default=list(MODELS))
     args = ap.parse_args()
     cfg = load_config(args.config, args.set)
     ecfg = cfg["evaluation"]
     _init((args.config, args.set))
+    _G["models"] = args.models
     if args.report_only:
         write_report(pd.read_csv(resolve_path("outputs/evaluation/loo_results.csv")), cfg, len(_G["df"]), _G["K"])
         print("report rewritten")
@@ -128,7 +147,7 @@ def main() -> None:
     print(f"LOO on {len(folds)}/{len(df)} cycles with {workers} workers; K = {_G['K']}")
     t0 = time.time()
     rows = []
-    with mp.get_context("fork").Pool(workers, initializer=_init, initargs=((args.config, args.set),)) as pool:
+    with mp.get_context("fork").Pool(workers, initializer=_init_worker, initargs=((args.config, args.set), args.models)) as pool:
         for j, out in enumerate(pool.imap_unordered(run_fold, folds)):
             rows += out
             if (j + 1) % 10 == 0:
@@ -144,15 +163,18 @@ def main() -> None:
 def write_report(res: pd.DataFrame, cfg: dict, n_total: int, K: dict) -> None:
     fig_dir = resolve_path("docs/figures")
     plt.rcParams.update({"axes.grid": True, "grid.alpha": 0.3})
-    labels = {"segmented": "TP-GMM segmented", "monolithic": "TP-GMM monolithic", "ik_planner": "IK planner"}
-    metrics = [("rmse_pos_mm", "trajectory RMSE [mm]"), ("grasp_err_mm", "grasp point error [mm]"),
+    labels = {"segmented": "TP-GMM segmented", "monolithic": "TP-GMM monolithic", "ik_planner": "IK planner",
+              "lpv_ds": "LPV-DS"}
+    present = [m for m in MODELS if m in set(res.model)]
+    metrics = [("path_dev_mm", "path deviation, time-free [mm]") if "path_dev_mm" in res else
+               ("rmse_pos_mm", "trajectory RMSE [mm]"), ("grasp_err_mm", "grasp point error [mm]"),
                ("release_err_mm", "release point error [mm]"), ("rmse_heading_deg", "heading RMSE [deg]"),
                ("rmse_gripper", "gripper RMSE [0-100]"), ("ik_feasible", "IK-feasible fraction")]
     fig, axs = plt.subplots(2, 3, figsize=(15, 7.5))
     for ax, (col, title) in zip(axs.flat, metrics):
-        data = [res[res.model == m][col].dropna().to_numpy() for m in MODELS]
+        data = [res[res.model == m][col].dropna().to_numpy() for m in present]
         ax.boxplot(data, showfliers=False)
-        ax.set_xticks(range(1, len(MODELS) + 1), [labels[m] for m in MODELS], fontsize=8)
+        ax.set_xticks(range(1, len(present) + 1), [labels[m] for m in present], fontsize=8)
         ax.set_title(title, fontsize=10)
     fig.tight_layout(); fig.savefig(fig_dir / "eval_boxplots.png", dpi=100); plt.close(fig)
 
@@ -177,7 +199,7 @@ def write_report(res: pd.DataFrame, cfg: dict, n_total: int, K: dict) -> None:
     A("_Generated by `scripts/evaluate_offline.py`. Raw results: `outputs/evaluation/loo_results.csv` (copy in `docs/evaluation_loo_results.csv`)._\n")
     A("## Protocol\n")
     A(f"- Held-out cycles: **{n}** of {n_total} usable cycles "
-      f"({'all' if n == n_total else 'stratified by colour and lateral position'}). For each, the three policies "
+      f"({'all' if n == n_total else 'stratified by colour and lateral position'}). For each, the {len(present)} policies "
       "are refitted on the remaining cycles and the box frame is re-estimated without the held-out cycle.")
     A(f"- Number of components fixed to the BIC choice on all data: {K}. The pixel→base homography was also "
       "calibrated on all cycles (one correspondence out of ~340 inliers: negligible, but stated).")
@@ -187,18 +209,23 @@ def write_report(res: pd.DataFrame, cfg: dict, n_total: int, K: dict) -> None:
     A("- Metrics: position RMSE over the cycle (200 time-aligned samples); grasp error = predicted TCP at the "
       "predicted grasp instant (segmented/planner: end of the approach primitive; monolithic: where its gripper "
       "closes) vs the demonstrated contact; release error = end of the cycle vs the demonstrated end of release; "
-      "IK feasibility = fraction of points with an IK solution inside the joint limits (pitch output used).\n")
+      "IK feasibility = fraction of points with an IK solution inside the joint limits (pitch output used).")
+    A("- **Path deviation** is time-free: symmetric mean closest-point distance between the generated and the "
+      "demonstrated TCP paths, both resampled by arc length. The LPV-DS has no clock: it runs at its own pace "
+      "(its duration error is reported) and, for the time-aligned metrics only, each of its primitives is rescaled "
+      "to the demonstrated duration.\n")
     A("## Results (median [IQR])\n")
-    cols = [("rmse_pos_mm", "traj. RMSE [mm]"), ("rmse_approach_mm", "approach RMSE [mm]"),
+    cols = [("path_dev_mm", "path dev. [mm]"), ("rmse_pos_mm", "traj. RMSE [mm]"), ("rmse_approach_mm", "approach RMSE [mm]"),
             ("rmse_transport_mm", "transport RMSE [mm]"), ("grasp_err_mm", "grasp err [mm]"),
             ("grasp_err_oracle_timing_mm", "grasp err, oracle timing [mm]"), ("release_err_mm", "release err [mm]"),
             ("grasp_heading_err_deg", "grasp heading err [°]"), ("rmse_gripper", "gripper RMSE")]
+    cols = [c for c in cols if c[0] in res]
     A("| model | " + " | ".join(c[1] for c in cols) + " |")
     A("|---|" + "---|" * len(cols))
-    for m in MODELS:
+    for m in present:
         A(f"| {labels[m]} | " + " | ".join(cell(m, c) for c, _ in cols) + " |")
     A("\n| model | IK-feasible fraction (mean) | cycles 100 % feasible | max joint step [°] (median) |\n|---|---|---|---|")
-    for m in MODELS:
+    for m in present:
         s = res[res.model == m]
         A(f"| {labels[m]} | {s.ik_feasible.mean():.3f} | {100 * (s.ik_feasible == 1).mean():.0f} % | "
           f"{s.ik_max_step_deg.median():.1f} |")
@@ -220,12 +247,17 @@ def write_report(res: pd.DataFrame, cfg: dict, n_total: int, K: dict) -> None:
     A("## Reading\n")
     A("Paired comparison on the same held-out cycles (Wilcoxon signed-rank; share of cycles where the segmented "
       "model is better):\n")
-    A("| metric | segmented vs monolithic | segmented vs IK planner |\n|---|---|---|")
-    for col, lab in (("rmse_pos_mm", "trajectory RMSE"), ("grasp_err_mm", "grasp error"),
-                     ("release_err_mm", "release error")):
-        p1, f1 = test(col, "monolithic")
-        p2, f2 = test(col, "ik_planner")
-        A(f"| {lab} | p = {p1:.1g}, better in {100 * f1:.0f} % | p = {p2:.1g}, better in {100 * f2:.0f} % |")
+    others = [m for m in present if m != "segmented"]
+    A("| metric | " + " | ".join(f"segmented vs {labels[o]}" for o in others) + " |\n|---|" + "---|" * len(others))
+    for col, lab in (("path_dev_mm", "path deviation"), ("rmse_pos_mm", "trajectory RMSE"),
+                     ("grasp_err_mm", "grasp error"), ("release_err_mm", "release error")):
+        if col not in res:
+            continue
+        cells = []
+        for o in others:
+            p_, f_ = test(col, o)
+            cells.append(f"p = {p_:.1g}, better in {100 * f_:.0f} %")
+        A(f"| {lab} | " + " | ".join(cells) + " |")
     mono = by["monolithic"]
     wrong = seg_[~seg_.k_correct.astype(bool)]
     right = seg_[seg_.k_correct.astype(bool)]
@@ -243,6 +275,16 @@ def write_report(res: pd.DataFrame, cfg: dict, n_total: int, K: dict) -> None:
       f"demonstrated motion (trajectory RMSE {by['ik_planner'].rmse_pos_mm.median():.0f} vs "
       f"{seg_.rmse_pos_mm.median():.0f} mm), its gripper timing is worse, its joint steps are larger, and "
       f"{100 * (1 - (by['ik_planner'].ik_feasible == 1).mean()):.0f} % of its cycles contain an IK-infeasible point.")
+    if "lpv_ds" in by:
+        lp = by["lpv_ds"]
+        A(f"- **TP-GMM vs LPV-DS.** The stable DS reaches the cube as accurately (grasp error "
+          f"{lp.grasp_err_mm.median():.1f} vs {seg_.grasp_err_mm.median():.1f} mm) — the floor is vision and the "
+          "operator, not the policy — but reproduces the demonstrated path less closely (path deviation "
+          f"{lp.path_dev_mm.median():.0f} vs {seg_.path_dev_mm.median():.0f} mm): a first-order field of the position "
+          "cannot represent the arched approach (rise first, then descend) where the velocity depends on the phase, "
+          f"not only on the position. It runs at its own pace (duration error {lp.duration_err_s.median():+.2f} s "
+          "median). Its advantages are not visible in this offline test: convergence is guaranteed and it reacts "
+          "to the current state — see `perturbation_report.md`.")
     A(f"- **Release:** no significant difference; all three are bounded by the spread of the demonstrated releases "
       "in the box (~2 cm), which the box frame cannot explain (the operator dropped the cube anywhere in it).")
     A(f"- **Cube-yaw choice (90° symmetry):** see the next section.")

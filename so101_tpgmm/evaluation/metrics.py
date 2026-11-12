@@ -82,3 +82,33 @@ def ik_feasibility(ro: Rollout, ik: SO101IK, q0_rad: np.ndarray, stride: int = 2
     res = ik.solve_trajectory(ro.Y[idx, :3], tool_yaw_from_heading(ro.Y[idx, names.index("h")]), q0_rad,
                               max_restarts=3, pitch=pitch)
     return {"ik_feasible": res.feasible_fraction, "ik_max_step_deg": float(np.degrees(res.max_joint_step[1:].max()))}
+
+
+def _resample_arclength(P: np.ndarray, n: int = 200) -> np.ndarray:
+    s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
+    if s[-1] < 1e-9:
+        return np.repeat(P[:1], n, axis=0)
+    q = np.linspace(0, s[-1], n)
+    return np.stack([np.interp(q, s, P[:, j]) for j in range(P.shape[1])], axis=1)
+
+
+def path_deviation(P_pred: np.ndarray, P_demo: np.ndarray) -> float:
+    """Time-free path distance [m]: symmetric mean of closest-point distances between the two
+    paths, both resampled uniformly in arc length."""
+    A, B = _resample_arclength(P_pred), _resample_arclength(P_demo)
+    D = np.linalg.norm(A[:, None, :] - B[None, :, :], axis=2)
+    return float(0.5 * (D.min(axis=1).mean() + D.min(axis=0).mean()))
+
+
+def retime(ro: Rollout, durations: list[float]) -> Rollout:
+    """Rescale each primitive of a rollout to the given durations (for a policy without a clock, e.g.
+    a dynamical system, before time-aligned metrics)."""
+    t = np.empty_like(ro.t)
+    t0, start = 0.0, 0
+    for i, end in enumerate(ro.boundaries):
+        seg = ro.t[start:end + 1]
+        span = seg[-1] - seg[0] if len(seg) > 1 else 1.0
+        t[start:end + 1] = t0 + (seg - seg[0]) / max(span, 1e-9) * durations[i]
+        t0, start = t[end], end + 1
+    t[start:] = t0
+    return Rollout(t, ro.Y, ro.cov, ro.primitive, ro.names, ro.boundaries, ro.cube_heading, ro.cube_k)
