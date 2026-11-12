@@ -387,6 +387,22 @@ def main() -> None:
                      "magenta: base-frame 5 cm grid via the fitted homography", fontsize=9)
         fig.tight_layout(); fig.savefig(fig_dir / "camera_homography_overlay.png"); plt.close(fig)
 
+    # camera views: first frame / contact / release for a few episodes
+    tiles = []
+    for k in (0, 100, 250, 399):
+        ep = ds.episode(k)
+        ev = detect_gripper_events(ep.state[:, 5], ds.fps, gp)
+        if not ev.cycles:
+            continue
+        c = ev.cycles[0]
+        frames, _ = ds.read_frames(cam_key, k, ep.timestamps[[0, c.close_idx, c.open_idx]])
+        tiles.append(np.hstack([cv2.resize(f, (320, 240), interpolation=cv2.INTER_AREA) for f in frames]))
+    if tiles:
+        fig, ax = plt.subplots(figsize=(9, 2.9 * len(tiles)))
+        ax.imshow(np.vstack(tiles)); ax.axis("off")
+        ax.set_title("Fixed camera: first frame | grasp (contact) | release — episodes 0, 100, 250, 399", fontsize=9)
+        fig.tight_layout(); fig.savefig(fig_dir / "camera_views.jpg", dpi=100, bbox_inches="tight", pad_inches=0.05); plt.close(fig)
+
     summary.round(4).to_csv(resolve_path("docs/episodes_summary.csv"), index=False)
 
     # ------------------------------------------------------------------ report

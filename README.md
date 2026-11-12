@@ -1,65 +1,188 @@
 # SO101-ARM-TP-GMM
 
-Learning from Demonstration with **Task-Parameterized Gaussian Mixture Models** for the
-SO-101 arm (LeRobot, 5 DOF + gripper), trained on the teleoperation dataset
-[`SebRivGar/dataset3`](https://huggingface.co/datasets/SebRivGar/dataset3) (LeRobot v3.0,
-originally recorded for ACT). Task: pick a coloured cube from the table and drop it in a fixed box.
+Aprendizaje por demostración (*Learning from Demonstration*) con **Task-Parameterized Gaussian
+Mixture Models (TP-GMM)** para el brazo **SO-101** (LeRobot, 5 DOF + gripper).
 
-## Status
+Las demostraciones son las del dataset de teleoperación
+[`SebRivGar/dataset3`](https://huggingface.co/datasets/SebRivGar/dataset3) (formato LeRobot v3.0),
+grabado originalmente para entrenar ACT. La tarea es *pick-and-place*: tomar un cubo de color
+(amarillo, rojo, verde o azul) de la mesa y dejarlo en un recipiente fijo.
 
-| Phase | Content | State |
+![Vistas de la cámara fija: inicio, agarre y soltado](docs/figures/camera_views.jpg)
+
+*Cámara fija (`observation.images.top`): primer frame, instante de agarre e instante de soltado en
+cuatro episodios. El robot está arriba al centro y el recipiente arriba a la derecha. Los carriles de
+cinta azul miden 10 × 40 cm por dentro.*
+
+---
+
+## Estado
+
+| Fase | Contenido | Estado |
 |---|---|---|
-| 0 | Dataset inspection → [`docs/dataset_report.md`](docs/dataset_report.md) | done |
-| 1 | FK (done) + numerical IK | in progress |
-| 2 | Gripper-based segmentation into primitives | detector done, primitives pending |
-| 3 | Fixed-camera vision + pixel→table calibration | pending (preliminary geometry in the report) |
-| 4 | TP-GMM (numpy EM + GMR) | pending |
-| 5 | Leave-one-out evaluation, inference, robot stub | pending |
+| 0 | Inspección del dataset → [`docs/dataset_report.md`](docs/dataset_report.md) | ✅ |
+| 0b | Calibración de la cámara con la cuadrícula de cinta → [`docs/camera_calibration.md`](docs/camera_calibration.md) | ✅ preliminar |
+| 1 | Cinemática: FK desde el URDF (✅) e IK numérica con límites | en curso |
+| 2 | Segmentación por gripper en primitivas (approach+grasp, transport+release) | detector listo |
+| 3 | Visión con la cámara fija (HSV, minAreaRect, yaw plegado, homografía) | pendiente |
+| 4 | TP-GMM en numpy (EM + GMR con producto de Gaussianas, BIC) | pendiente |
+| 5 | Evaluación leave-one-out, inferencia desde imagen y stub del robot | pendiente |
 
-## Install
+## Instalación
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-## Quick start
+Python ≥ 3.10. Para decodificar los videos AV1 basta PyAV, cuyas *wheels* ya incluyen FFmpeg con
+**libdav1d**; no hace falta torchcodec. `lerobot` solo se necesita en la máquina conectada al robot
+(`pip install -e ".[robot]"`).
+
+## Uso
+
+Descargar el dataset (unos 1 GB: datos tabulares y solo la cámara fija) y generar el reporte:
 
 ```bash
-python scripts/inspect_dataset.py --download   # ~1 GB: tabular data + fixed-camera videos
+python scripts/inspect_dataset.py --download
+```
+
+Calibrar la cámara con la cuadrícula de cinta y registrarla con la base del robot:
+
+```bash
+python scripts/calibrate_camera_grid.py
+```
+
+Correr los tests (los que usan el dataset real se saltan si no está descargado):
+
+```bash
 python -m pytest
 ```
 
-## Layout
+Cualquier parámetro de `configs/default.yaml` se puede sobrescribir desde la línea de comandos:
+
+```bash
+python scripts/inspect_dataset.py --set gripper.open_threshold=26 gripper.close_threshold=23
+```
+
+---
+
+## Lo que dicen los datos (Fase 0)
+
+Los detalles y todas las cifras están en [`docs/dataset_report.md`](docs/dataset_report.md), que se
+regenera con el script.
+
+- **Formato:** LeRobot v3.0, 30 fps, 400 episodios de ~20 s (duración fija), una tarea y dos cámaras
+  de 640×480 en AV1 (fija y muñeca). El `action` del líder **no se usa**.
+- **Unidades de `observation.state`: grados.** No se supuso: el modo `DEGREES` de LeRobot deja una
+  huella exacta, porque todos los valores son múltiplos de 360/4095°. Además aparecen valores de
+  −105° y +110,6°, imposibles en el modo −100…100, que recorta. El gripper está en 0…100.
+- **Un cubo por episodio.** 392 de 400 episodios tienen exactamente un ciclo agarre→soltado.
+- **El gripper tiene tres niveles, no dos:** cerrado vacío (0–12), **sujetando el cubo** (~20, las
+  mordazas se detienen sobre el cubo de 4 cm) y abierto (≥ 25). Por eso se usa histéresis y
+  clasificación por meseta. Un umbral único produce ciclos fantasma, por ejemplo cuando el operador
+  cierra a medias en el aire.
+
+![Eventos del gripper](docs/figures/gripper_examples.png)
+
+*Señal del gripper (azul) y altura del TCP por FK (naranja). Verde marca el contacto y rojo el
+soltado; en gris, agarre fallido; en naranja, meseta "sujetando" sin soltado (a la altura de la mesa
+o en el aire).*
+
+- **La FK es consistente:** todos los agarres ocurren a la misma altura (TCP entre −1,9 y +1,0 cm en
+  el 98 % de los casos), lo que valida unidades, signos y el cero del URDF. Los soltados se agrupan
+  en el recipiente.
+
+![Posiciones de agarre y soltado](docs/figures/grasp_xy_scatter.png)
+
+- **Límites articulares:** la pose de reposo deja `shoulder_lift` en −104°, fuera del límite del
+  URDF (±100°). Solo el 36 % de los frames respeta todos los límites del URDF, así que la IK usará
+  la unión de los límites del URDF y el rango observado.
+
+## Geometría cámara ↔ robot
+
+Se resolvió en dos pasos.
+
+**1. Solo con el dataset.** Se emparejó el cubo detectado en el primer frame con la posición de
+la FK en el agarre ([reporte §6](docs/dataset_report.md)). La relación píxel→mesa sale con ~8 mm de
+error mediano. Como hallazgo, el centro del cubo agarrado **no** coincide con `gripper_frame_link`:
+hay un desplazamiento en el marco de la herramienta, porque el SO-101 tiene una sola mordaza móvil.
+La posición e inclinación de la cámara quedaron mal determinadas.
+
+**2. Con la cuadrícula de cinta** (carriles de 10 × 40 cm por dentro, medidos en el montaje real;
+[`docs/camera_calibration.md`](docs/camera_calibration.md)). Se ajustó la homografía a unos 2700
+puntos de borde interior con precisión subpíxel. Se usan bordes y no esquinas porque el robot y el
+recipiente tapan partes de la cuadrícula.
+
+![Calibración con la cuadrícula](docs/figures/grid_calibration.png)
+
+| Magnitud | Valor | Cómo se obtiene |
+|---|---|---|
+| Error de la homografía sobre la cinta | 0,9 mm (mediana) | ajuste a los bordes |
+| Ancho de la cinta | 15,6 mm | estimado |
+| Focal | 496 px (HFOV 66°) | homografía + altura medida de 55 cm |
+| Inclinación del eje óptico | 9,4° | *keystone* de la cuadrícula |
+| Lente sobre la mesa, marco base (x, y) | (35,6; 1,3) cm, a ~32 cm del eje pan | supone el punto principal en el centro (±2 cm por cada 20 px) |
+| Origen de `base_link` en la cuadrícula | 1,8 cm más allá de la cinta del lado del robot, 2,1 cm del eje central | registro cubos ↔ FK |
+| Escala FK vs cinta | 0,953 | ⚠ la FK sale un 4,7 % más corta que la cinta; pendiente de verificar en el robot |
+
+**Mediciones pendientes en el robot real** (cualquiera de ellas mejora la calibración):
+
+1. Distancia horizontal del eje de `shoulder_pan` al punto de la mesa bajo la lente.
+2. Posición de la base respecto de la cinta, para confirmar los 1,8 cm y −2,1 cm de arriba.
+3. Desplazamiento real del TCP entre dos poses separadas ~30 cm, para resolver la discrepancia de
+   escala del 4,7 %.
+4. Opcional: calibración de intrínsecos con un tablero de ajedrez, para obtener el punto principal
+   y la distorsión.
+
+---
+
+## Estructura
 
 ```
-configs/default.yaml        all thresholds / paths (YAML, overridable with --set key=value)
+configs/default.yaml          umbrales, rutas y medidas de la escena (YAML)
 so101_tpgmm/
-  data/        LeRobot v3 reader, AV1 video reader (timestamp-checked), unit inference
-  kinematics/  URDF parser, batched FK (vendored so101_new_calib.urdf)
-  segmentation/ gripper event detection (hysteresis, 3-level plateaus)
-  vision/      camera <-> robot geometry (homography, decomposition)
-  tpgmm/  robot/   (later phases)
-scripts/inspect_dataset.py  Phase 0 report generator
-docs/                       reports, silent-failure catalogue, figures
-tests/                      pytest (real-data tests skip if the dataset is absent)
+  config.py                   carga de YAML y overrides --set
+  data/
+    lerobot_dataset.py        lector LeRobot v3.0 (parquet + MP4) sin depender de lerobot
+    video.py                  decodificación AV1 con verificación de timestamp
+    units.py                  inferencia de unidades y conversión explícita a radianes
+  kinematics/
+    urdf.py, fk.py            parser de URDF y FK vectorizada (so101_new_calib.urdf incluido)
+  segmentation/gripper.py     eventos del gripper: histéresis, 3 niveles, duración mínima
+  vision/
+    camera_pose.py            homografía con offset del cubo, descomposición, chequeo de espejo
+    grid_calibration.py       bordes subpíxel de la cinta y ajuste punto-a-recta
+  tpgmm/, robot/              (fases siguientes)
+scripts/
+  inspect_dataset.py          Fase 0: reporte, figuras y CSV por episodio
+  calibrate_camera_grid.py    calibración métrica con la cuadrícula
+docs/
+  dataset_report.md           reporte del dataset (generado)
+  camera_calibration.md       calibración de la cámara (generado)
+  silent_failures.md          catálogo de fallas silenciosas y sus guardas
+  episodes_summary.csv        ciclos, instantes y posiciones por episodio
+tests/                        pytest (34 tests)
 ```
 
-## Design decisions (so far)
+## Decisiones de diseño
 
-* **No `lerobot` import in the offline pipeline.** The v3.0 parquet/MP4 layout is read
-  directly, so training/evaluation run without torch; `lerobot` is only needed by the robot
-  runner on the machine connected to the arm.
-* **Units are inferred, never assumed.** LeRobot's normalization leaves integer-tick
-  fingerprints; `infer_joint_units` checks them and the range (|v| > 100 is impossible in
-  `RANGE_M100_100`). The dataset is in **degrees**; FK only accepts radians and the conversion
-  is explicit (`fk_from_dataset`).
-* **Video frames are verified by timestamp**: `VideoReader` raises if the decoded
-  presentation time differs from the requested one by more than 0.4 frame.
-* **Gripper: three levels + hysteresis**, not one threshold: closed-empty / holding (~20, the
-  4 cm cube stops the jaws) / open. A level-only rule creates phantom cycles when the operator
-  half-closes the gripper in the air; a table-height gate is added in Phase 2.
-* **Cube centre ≠ TCP.** `gripper_frame_link` is offset from the centre of a grasped cube
-  (single moving jaw); calibration and the cube frame use `p_tcp + R_tcp · offset`.
-* **Camera geometry from the data is only partly identifiable**: pixel→table mapping and
-  focal (given the measured height) yes; lens position/tilt only within several cm/degrees.
-  See report §6.
+| Decisión | Justificación |
+|---|---|
+| No importar `lerobot` en el pipeline offline | El formato v3.0 (parquet + MP4) se lee directamente, así que entrenamiento y evaluación corren sin torch. `lerobot` solo hace falta en el runner del robot. |
+| Unidades inferidas, nunca supuestas | Confundir grados con −100…100 no produce errores, solo poses plausibles pero falsas. `infer_joint_units` verifica la cuantización y el rango; la FK solo acepta radianes y la conversión es explícita (`fk_from_dataset`). |
+| Frames verificados por timestamp | v3.0 empaqueta muchos episodios por MP4. `VideoReader` lanza un error si el frame decodificado se aleja más de 0,4 frame del tiempo pedido. |
+| Gripper con histéresis y 3 niveles | La meseta "sujetando" (~20) y las aperturas pequeñas (25–28) rondan cualquier umbral único. Además se exige una duración mínima y, en la Fase 2, un filtro de altura: sin apilamiento, todo agarre real ocurre a la altura de la mesa. |
+| Centro del cubo = TCP + offset | `gripper_frame_link` no es el centro del cubo agarrado. Modelarlo baja el error de calibración de 10,6 a 8,4 mm (homografía) y de 15,1 a 9,9 mm (registro con la cuadrícula). |
+| Calibración por bordes, no por esquinas | El robot y el recipiente ocultan esquinas. Miles de puntos de borde con restricciones punto-a-recta son robustos a esas oclusiones y dan precisión submilimétrica sobre la mesa. |
+| Incertidumbre reportada explícitamente | La posición y la inclinación de una cámara casi cenital están acopladas. Se reportan intervalos por bootstrap y la sensibilidad al punto principal en lugar de un solo número. |
+
+Las fallas silenciosas identificadas y sus guardas (tests o asserts) están en
+[`docs/silent_failures.md`](docs/silent_failures.md).
+
+## Referencias
+
+- Calinon, S. (2016). *A tutorial on task-parameterized movement learning and retrieval.*
+  Intelligent Service Robotics, 9(1).
+- LeRobot: <https://github.com/huggingface/lerobot>
+- URDF del SO-101: [TheRobotStudio/SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100)
+  (`Simulation/SO101/so101_new_calib.urdf`)

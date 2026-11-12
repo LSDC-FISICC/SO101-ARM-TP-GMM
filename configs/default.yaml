@@ -36,15 +36,22 @@ scene:
   camera_footprint_from_pan_axis: 0.24   # [m] assumed until measured; must be > 0.14
   camera_stand_from_robot_base: 0.46     # [m] measured by tape (to the stand base)
 
+grid:
+  # Blue floor tape: lanes side by side; INNER dimensions measured on the real setup.
+  n_lanes: 4
+  lane_width: 0.10           # [m] inner
+  lane_length: 0.40          # [m] inner
+  tape_width_guess: 0.02     # [m] estimated by the fit
+  exclude_boxes: [[440, 0, 640, 115]]   # pixel boxes to ignore (the box occludes a corner)
+
 camera:
-  # PRELIMINARY intrinsics/extrinsics from the dataset (homography + measured height),
-  # principal point at the image centre, square pixels, no distortion model.
-  # Well determined: focal (given the height). Poorly determined: lens x/y and tilt
-  # (bootstrap 95% CI: x 21.8-28.3 cm, tilt 2-6 deg). See docs/dataset_report.md §6.
+  # From the taped grid (scripts/calibrate_camera_grid.py -> docs/camera_calibration.md,
+  # full extrinsics in outputs/camera_calibration.yaml). Principal point assumed at the
+  # image centre; the lens footprint is sensitive to it (+-2 cm per 20 px).
   image_size: [640, 480]
-  focal_px: 498
-  lens_position_base: [0.251, -0.015, null]   # [m] x, y in base frame; z ~0.55 above table
-  optical_axis_tilt_deg: 3.5
+  focal_px: 496
+  lens_position_base: [0.356, 0.013, 0.546]   # [m] base frame
+  optical_axis_tilt_deg: 9.4
 
 gripper:
   # Gripper values are in LeRobot RANGE_0_100 (0 = calibrated min = closed).

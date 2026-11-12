@@ -100,7 +100,7 @@ Anomalies (all listed in `docs/episodes_summary.csv`):
 ## 5. Video decoding and timestamp alignment
 
 - AV1 decoders available through PyAV 19.0.2: `libdav1d, av1` (the PyAV wheel bundles FFmpeg with **libdav1d**; no torchcodec needed).
-- Decoding speed ≈ 54 ms per random-access frame (seek + decode up to the next keyframe; GOP = 2).
+- Decoding speed ≈ 50 ms per random-access frame (seek + decode up to the next keyframe; GOP = 2).
 - `timestamp == frame_index / fps` for every frame (max deviation 8.9e-07 s).
 - Per-episode video span `(to − from)·fps` vs `length`: max deviation 0.00 frames.
 - Decoded presentation time vs state timestamp (first/middle/last frame of episodes [0, 57, 114, 171, 228, 285, 342, 399]): max |Δt| = **0.00 ms** (tolerance 0.4 frame). `VideoReader` raises if the decoded frame is off by more than the tolerance.
