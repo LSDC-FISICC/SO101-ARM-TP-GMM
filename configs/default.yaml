@@ -178,3 +178,34 @@ inspection:
   figures_dir: docs/figures
   n_video_check_episodes: 8   # episodes whose first/last frame is decoded and checked
   camera_bootstrap: 60        # bootstrap resamples for the camera-geometry uncertainty
+
+sim:
+  # MuJoCo simulation (scripts/simulate_mujoco.py). Robot: official SO-101 MJCF, fetched by
+  # scripts/fetch_so101_mujoco.sh into robot_dir.
+  robot_dir: third_party/so101_mujoco
+  # Table top in the FK base frame, as a plane z = a + b x + c y: the lowest finger point at the
+  # demonstrated grasps, fitted over the workspace (residual 5.7 mm), minus 1 cm. In FK coordinates
+  # the real (flat) table looks tilted (~3.4 deg, lower far from the robot) and ~2.5 cm below the
+  # tape-grid estimate (-0.4 cm): that is the joint-calibration error of the FK. In simulation what
+  # matters is that the table and the commanded joints are consistent.
+  table_plane: [-0.0112, -0.059, 0.004]
+  grasp_assist: false        # true: weld a cube touched by both fingers while the gripper is closed
+  cube_mass: 0.03            # [kg] (not measured)
+  cube_friction: 1.2
+  finger_friction: 1.5
+  # Open container. Its size was NOT measured: 12 x 12 cm inner holds every demonstrated release
+  # (cube at release: median (5.75, 18.3) cm, p5-p95 +-2.2 cm) with 1-3.6 cm to spare, extends away
+  # from the grasped cubes, and leaves >= 1.7 cm between its walls and any demonstrated cube.
+  box:
+    center_xy: [0.045, 0.19]
+    inner: [0.12, 0.12]
+    wall_h: 0.045
+    wall_t: 0.005
+  n_cubes: 3
+  colors: [red, yellow, green]
+  min_separation: 0.08       # [m] between cube centres
+  box_clearance: 0.04        # [m] sampled cube centre to box wall (outer face), beyond half a cube
+  sample_radius: 0.02        # cube xy = a demonstrated cube position + uniform disc of this radius
+  # Variant --box-slots: release the k-th cube at the training box frame + these offsets [m], i.e. in its
+  # own slot of the box (cube landing points (7.8, 15.8), (2.3, 15.8), (5.0, 21.8) cm: >= 5.5 cm apart).
+  box_slots: [[0.020, -0.025], [-0.035, -0.025], [-0.0075, 0.035]]

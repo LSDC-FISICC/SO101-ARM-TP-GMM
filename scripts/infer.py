@@ -27,20 +27,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from so101_tpgmm.config import load_config, resolve_path  # noqa: E402
 from so101_tpgmm.inference import plan_from_image, save_plan  # noqa: E402
 from so101_tpgmm.kinematics.ik import ik_from_config  # noqa: E402
-from so101_tpgmm.planner.ik_planner import IKPlanner  # noqa: E402
-from so101_tpgmm.tpgmm.policy import TPGMMPolicy  # noqa: E402
+from so101_tpgmm.policies import POLICIES, load_policy  # noqa: E402
 from so101_tpgmm.vision.calibration import VisionCalibration  # noqa: E402
 from so101_tpgmm.vision.draw import draw_detections  # noqa: E402
 from so101_tpgmm.vision.geometry import PixelToBase  # noqa: E402
-
-
-def load_policy(cfg: dict, name: str):
-    mdir = resolve_path(cfg["tpgmm"]["models_dir"])
-    if name == "ik_planner":
-        pol = IKPlanner.load(mdir / "ik_planner.json")
-        pol.primitives = ["approach_grasp", "transport_release"]
-        return pol
-    return TPGMMPolicy.load(mdir / f"{name}.json")
 
 
 def main() -> None:
@@ -50,7 +40,7 @@ def main() -> None:
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--image", type=str)
     src.add_argument("--episode", type=int)
-    ap.add_argument("--policy", choices=["segmented", "monolithic", "ik_planner"], default=None)
+    ap.add_argument("--policy", choices=list(POLICIES), default=None)
     ap.add_argument("--colors", nargs="*", default=None, help="colour order (default: inference.color_order)")
     ap.add_argument("--start-joints", type=float, nargs=5, default=None, help="current joints [deg]")
     ap.add_argument("--start-gripper", type=float, default=None)

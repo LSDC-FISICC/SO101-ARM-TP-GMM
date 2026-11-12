@@ -75,6 +75,43 @@ def order_cubes(dets: list[CubeDetection], xy: np.ndarray, color_order: list[str
     return sorted(range(len(dets)), key=lambda i: (rank.get(dets[i].color, len(rank)), float(np.hypot(*xy[i]))))
 
 
+def plan_cube(policy, ik: SO101IK, cp: CubePlan, q_deg: np.ndarray, g: float, cfg: dict, heading: float | None = None,
+              box: np.ndarray | None = None):
+    """Cartesian rollout and IK for one cube from joints ``q_deg`` (fills ``cp``'s status fields).
+
+    With ``heading`` None and an ambiguous cube (two equivalent yaws within the margin), both are
+    planned and the IK-feasible one with the least joint motion is kept. ``box``: box frame (x, y, z, yaw)
+    for the transport primitive (default: the training box). Returns (rollout, IK result),
+    or (None, None) when the cube is skipped (``cp.status`` says why).
+    """
+    icfg = cfg["inference"]
+    dt = float(icfg["dt"])
+    start = cartesian_state(ik, q_deg, g)
+    if heading is None:
+        target = heading_target(cp.position[:2], np.asarray(policy.meta["pan_xy"]), policy.meta["heading_offset"])
+        options = ambiguous_candidates(cp.yaw, target, np.deg2rad(icfg.get("ambiguity_margin_deg", 10.0)))
+    else:
+        options = [heading]
+    cp.ambiguous = len(options) > 1
+    best = None
+    for h in options:  # with an ambiguous cube, keep the feasible option with least joint motion
+        ro_c = policy.rollout(cp.position, cp.yaw, start=start, dt=dt, heading=h, box=box)
+        res_c = ik.solve_trajectory(ro_c.Y[:, :3], tool_yaw_from_heading(ro_c.Y[:, ro_c.names.index("h")]),
+                                    np.deg2rad(q_deg), max_restarts=3,
+                                    pitch=ro_c.Y[:, ro_c.names.index("pitch")] if "pitch" in ro_c.names else None)
+        score = (res_c.success.mean(), -float(np.abs(np.diff(res_c.q, axis=0)).sum()))
+        if best is None or score > best[0]:
+            best = (score, ro_c, res_c, h)
+    _, ro, res, cp.grasp_yaw = best
+    cp.ik_feasible, cp.n_samples = res.feasible_fraction, len(ro.Y)
+    if icfg.get("require_full_ik", True) and not res.success.all():
+        bad = np.flatnonzero(~res.success)
+        cp.status = (f"skipped: {len(bad)} unreachable points (first at t={ro.t[bad[0]]:.2f} s, "
+                     f"pos err {res.pos_err[bad[0]] * 1e3:.1f} mm)")
+        return None, None
+    return ro, res
+
+
 def plan_from_image(rgb: np.ndarray, policy, ik: SO101IK, p2b: PixelToBase, cube_z: float, cfg: dict,
                     start_joints_deg: np.ndarray | None = None, start_gripper: float | None = None,
                     colors: list[str] | None = None) -> Plan:
@@ -108,25 +145,8 @@ def plan_from_image(rgb: np.ndarray, policy, ik: SO101IK, p2b: PixelToBase, cube
         if "partial_blob" in d.flags:
             cp.status = "skipped: partial blob (cube partly hidden or lost in the mask)"
             continue
-        start = cartesian_state(ik, q, g)
-        target = heading_target(cp.position[:2], np.asarray(policy.meta["pan_xy"]), policy.meta["heading_offset"])
-        options = ambiguous_candidates(cp.yaw, target, np.deg2rad(icfg.get("ambiguity_margin_deg", 10.0)))
-        cp.ambiguous = len(options) > 1
-        best = None
-        for heading in options:  # with an ambiguous cube, keep the feasible option with least joint motion
-            ro_c = policy.rollout(cp.position, cp.yaw, start=start, dt=dt, heading=heading)
-            res_c = ik.solve_trajectory(ro_c.Y[:, :3], tool_yaw_from_heading(ro_c.Y[:, ro_c.names.index("h")]),
-                                        np.deg2rad(q), max_restarts=3,
-                                        pitch=ro_c.Y[:, ro_c.names.index("pitch")] if "pitch" in ro_c.names else None)
-            score = (res_c.success.mean(), -float(np.abs(np.diff(res_c.q, axis=0)).sum()))
-            if best is None or score > best[0]:
-                best = (score, ro_c, res_c, heading)
-        _, ro, res, cp.grasp_yaw = best
-        cp.ik_feasible, cp.n_samples = res.feasible_fraction, len(ro.Y)
-        if icfg.get("require_full_ik", True) and not res.success.all():
-            bad = np.flatnonzero(~res.success)
-            cp.status = (f"skipped: {len(bad)} unreachable points (first at t={ro.t[bad[0]]:.2f} s, "
-                         f"pos err {res.pos_err[bad[0]] * 1e3:.1f} mm)")
+        ro, res = plan_cube(policy, ik, cp, q, g, cfg)
+        if ro is None:
             continue
         qs = np.rad2deg(res.q)
         gs = np.clip(ro.Y[:, ro.names.index("g")], 0, 100)
