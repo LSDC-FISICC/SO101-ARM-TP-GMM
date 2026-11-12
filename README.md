@@ -26,7 +26,9 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 2 | Segmentación en ciclos y primitivas (approach+grasp, transport+release) con filtros físicos → [`docs/segmentation_report.md`](docs/segmentation_report.md) | ✅ |
 | 3 | Visión con la cámara fija: detección HSV, yaw plegado, homografía con RANSAC, validación de escena → [`docs/vision_report.md`](docs/vision_report.md) | ✅ |
 | 4 | TP-GMM en numpy (EM + GMR, producto de Gaussianas, BIC): segmentado (principal) y monolítico; en paralelo, planificador por IK sobre las mismas primitivas → [`docs/tpgmm_report.md`](docs/tpgmm_report.md) | ✅ |
-| 5 | Evaluación leave-one-out (segmentado vs monolítico vs planificador IK), inferencia imagen → trayectoria articular, stub del robot → [`docs/evaluation_report.md`](docs/evaluation_report.md) | ✅ |
+| 5 | Evaluación leave-one-out (segmentado vs monolítico vs planificador IK vs LPV-DS), inferencia imagen → trayectoria articular, stub del robot → [`docs/evaluation_report.md`](docs/evaluation_report.md) | ✅ |
+| 6 | Alternativa estable: LPV-DS (campo de velocidades con estabilidad garantizada) y prueba de perturbaciones → [`docs/lpvds_report.md`](docs/lpvds_report.md), [`docs/perturbation_report.md`](docs/perturbation_report.md), [`docs/ds_field.md`](docs/ds_field.md) | ✅ experimental |
+| 7 | Simulación en MuJoCo con 3 cubos aleatorios y las políticas aprendidas → [`docs/mujoco_sim.md`](docs/mujoco_sim.md) | ✅ |
 
 ## Instalación
 
@@ -128,6 +130,100 @@ o en el aire).*
   URDF (±100°). Solo el 36 % de los frames respeta todos los límites del URDF, así que la IK usará
   la unión de los límites del URDF y el rango observado.
 
+## Simulación en MuJoCo
+
+Tres cubos (rojo, amarillo, verde) en posiciones y orientaciones aleatorias dentro del espacio de trabajo
+demostrado; su pose es conocida (sin cámara). Para cada cubo, en el orden de colores, se ejecuta el mismo
+pipeline que en el robot: articulaciones medidas → política → IK → trayectoria articular a los servos
+simulados → vuelta a casa. Modelo oficial del SO-101 (TheRobotStudio, Apache-2.0), que coincide con nuestra
+FK a menos de 4 µm. Detalle, supuestos y límites en [`docs/mujoco_sim.md`](docs/mujoco_sim.md).
+
+![Las cuatro políticas con la misma disposición de cubos](docs/figures/sim_montage_seed0.gif)
+
+30 episodios × 3 cubos por condición, con las mismas disposiciones para todas las políticas y física de
+contacto pura. **Entregados** = soltados sobre el recipiente o dentro de él al final; si se forma una torre y
+se cae, cuenta igual.
+
+| política | entregados (como se entrenó) | dentro al final, un punto de liberación | dentro al final, casillas | dentro al final, casillas + 8 mm de ruido (agarre asistido) |
+|---|---|---|---|---|
+| TP-GMM segmentado | **96 %** | 77 % | **92 %** | **84 %** |
+| TP-GMM monolítico | 87 % | 76 % | 89 % | 84 % |
+| Planificador IK | 86 % | **81 %** | 82 % | 68 % |
+| LPV-DS | 61 % | 59 % | 60 % | 64 % |
+
+- **El TP-GMM segmentado es el mejor:** entrega el 96 % de los cubos; también gana en tres de las cuatro
+  condiciones de "dentro al final".
+- **Un solo punto de liberación apila los cubos.** Cada demostración tenía un solo cubo, así que la política
+  suelta los tres en el mismo lugar. Para la tarea no importa (se entregan igual). Si hiciera falta que
+  queden dentro, basta desplazar el marco del recipiente para cada cubo (casillas): es un cambio de
+  parámetro de tarea al ejecutar, sin reentrenar, y sube "dentro al final" de 77 a 92 %.
+- **LPV-DS agarra muchos menos cubos** (61 % frente a 97 %). La pose de reposo deja la pinza a la altura de
+  la mesa, y el campo, que depende solo de la posición, va casi en horizontal hacia el cubo con la pinza aún
+  cerrada y lo empuja. El TP-GMM reproduce el "subir y luego acercarse" del operador. La evaluación offline
+  no podía ver este problema.
+- **El planificador IK** omite el 11–14 % de los cubos porque algún punto de su trayectoria no es alcanzable.
+- **La percepción importa tanto como la política:** con 8 mm de ruido (el error típico de la visión actual)
+  el TP-GMM baja de 97 a 84 % incluso con agarre asistido.
+
+Ejecutarla:
+
+```bash
+pip install -e ".[sim]"
+```
+
+```bash
+scripts/fetch_so101_mujoco.sh
+```
+
+```bash
+MUJOCO_GL=egl python scripts/simulate_mujoco.py --episodes 30 --noise-mm 0 8 --video 1
+```
+
+## TP-GMM vs LPV-DS: ¿vale la pena?
+
+Leave-one-out sobre los 366 ciclos utilizables (mediana; detalle y pruebas pareadas en
+[`docs/evaluation_report.md`](docs/evaluation_report.md)):
+
+| modelo | desviación de trayectoria [mm] | error de agarre [mm] | error de liberación [mm] | ciclos 100 % factibles por IK |
+|---|---|---|---|---|
+| TP-GMM segmentado | **21.1** | **10.7** | 21.0 | 100 % |
+| TP-GMM monolítico | 25.1 | 12.8 | 21.4 | 100 % |
+| Planificador IK | 27.8 | 11.8 | 20.9 | 93 % |
+| LPV-DS | 25.7 | 11.8 | 21.1 | 97 % |
+
+Campos aprendidos por LPV-DS, una primitiva por fila: marco del cubo (arriba) y del recipiente (abajo).
+Las líneas de flujo muestran la dirección y la rapidez del campo; las elipses grises son los conjuntos de nivel
+de la función de Lyapunov, que decrece a lo largo de todo el campo:
+
+![LPV-DS: campo y Lyapunov](docs/figures/lpvds_field.png)
+
+Las 8 Gaussianas de cada primitiva (izquierda) reparten el espacio y cada una activa un sistema lineal estable
+A_k(x − x*); el campo es su mezcla ponderada por γ_k(x). Al centro y a la derecha, el DS integrado en 3-D
+desde el inicio de 25 demostraciones (azul) frente a esas demostraciones (gris): todas convergen, y se ve el
+desborde más allá del cubo en algunas aproximaciones.
+
+![LPV-DS: Gaussianas y rollouts](docs/figures/lpvds_gaussians_rollouts.png)
+
+- **Precisión:** el LPV-DS no mejora. Llega al cubo casi igual de bien (11,8 vs 10,7 mm; el piso lo
+  ponen la visión y el operador), pero sigue peor el camino demostrado: asigna una sola velocidad a cada
+  posición y las demostraciones cruzan las mismas regiones a ritmos distintos.
+- **Robustez** ([`docs/perturbation_report.md`](docs/perturbation_report.md), simulación cinemática del
+  TCP): el seguimiento indexado en el tiempo con realimentación resiste empujones, desplazamientos del
+  cubo y un robot más lento; falla solo ante una pausa larga cerca del agarre (el gripper cierra a 35 mm
+  del cubo). El LPV-DS es inmune a eso, pero **la detención de fase** (el reloj de la referencia espera
+  al robot) le da la misma inmunidad al TP-GMM sin cambiar el modelo.
+- **Advertencia de forma:** en ~18 % de las aproximaciones nominales el LPV-DS pasa por encima del cubo
+  y baja por el lado opuesto (demostraciones: 11 %, con desbordes mucho menores).
+- **Simulación física** ([`docs/mujoco_sim.md`](docs/mujoco_sim.md)): el LPV-DS agarra el 61 % de los cubos
+  frente al 97 % del TP-GMM, porque desde la pose de reposo (pinza a la altura de la mesa) su campo barre la
+  mesa hacia el cubo en lugar de subir primero.
+- **TP-LPV-DS:** no implementado. El recipiente nunca se mueve en el dataset, así que el marco del
+  recipiente no aporta nada que aprender; solo tendría sentido con demostraciones nuevas moviéndolo.
+- **Recomendación:** mantener el TP-GMM segmentado como política principal y ejecutarlo con detención
+  de fase en el robot (hoy solo está en `scripts/perturbation_benchmark.py`; falta llevarla a
+  `robot/so101_runner.py`, que reproduce un plan abierto). El LPV-DS queda como alternativa cuando se necesite convergencia garantizada
+  desde estados lejos de las demostraciones.
+
 ## Geometría cámara ↔ robot
 
 Se resolvió en dos pasos.
@@ -195,9 +291,19 @@ so101_tpgmm/
     tpgmm.py                  TP-GMM: EM, inicialización k-means en el tiempo, BIC, reproducción
     demos.py                  demostraciones, marcos cubo/caja, simetría de 90° del cubo
     policy.py                 política segmentada / monolítica, continuidad entre primitivas
+    cube_symmetry.py          elección entre las 4 orientaciones equivalentes del cubo
+    ds.py                     sistema dinámico GMR-DS (campo vectorial) a partir de las demostraciones
   planner/ik_planner.py       planificador geométrico por waypoints (línea base)
+  lpvds/
+    lpvds.py                  LPV-DS estable por construcción (Lyapunov cuadrático), DS escalares
+    policy.py                 política LPV-DS por primitiva en el marco del objetivo, gripper por estado
   evaluation/metrics.py       métricas: RMSE, error de agarre/soltado, factibilidad IK
   inference.py                imagen → cubos → trayectorias → articulaciones (orden de colores)
+  policies.py                 carga cualquier política entrenada por nombre
+  sim/
+    scene.py                  escena MuJoCo: SO-101 oficial, dedos por cajas, mesa inclinada (FK), recipiente, cubos
+    runner.py                 servos de posición a 30 Hz, mapeo del gripper, agarre por contacto o asistido
+    episode.py                episodio: cubos aleatorios, posición en la convención de la política, ejecución
   robot/so101_runner.py       stub para ejecutar en SO101Follower (LeRobot), con modo dry-run
 scripts/
   inspect_dataset.py          Fase 0: reporte, figuras y CSV por episodio
@@ -209,6 +315,12 @@ scripts/
   train.py                    Fase 4: entrena TP-GMM segmentado, monolítico y el planificador por IK
   evaluate_offline.py         Fase 5: validación leave-one-out por ciclo y figuras
   infer.py                    Fase 5: imagen (o episodio) → .npz/.csv con la trayectoria articular
+  plot_ds_field.py            campo vectorial y divergencia del DS aprendido (diagnóstico)
+  train_lpvds.py              entrena LPV-DS y genera su reporte (campo y conjuntos de nivel de Lyapunov)
+  plot_lpvds.py               figura de Gaussianas de LPV-DS y rollouts vs demostraciones
+  perturbation_benchmark.py   robustez: control indexado en el tiempo vs LPV-DS ante perturbaciones
+  fetch_so101_mujoco.sh       descarga el modelo MuJoCo oficial del SO-101 (TheRobotStudio, Apache-2.0)
+  simulate_mujoco.py          simulación MuJoCo: 3 cubos aleatorios, las 4 políticas, videos y reporte
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)
@@ -219,10 +331,14 @@ docs/
   vision_report.md            visión y calibración píxel→base (generado)
   cube_frames.csv             marco del cubo por ciclo (visión y FK), color y banderas
   tpgmm_report.md             entrenamiento, selección por BIC, componentes (generado)
-  evaluation_report.md        comparación leave-one-out de los tres modelos (generado)
+  evaluation_report.md        comparación leave-one-out de los cuatro modelos (generado)
+  mujoco_sim.md               simulación MuJoCo de las políticas (generado)
+  ds_field.md                 campo vectorial / divergencia del GMR-DS (generado)
+  lpvds_report.md             modelo LPV-DS (generado)
+  perturbation_report.md      prueba de perturbaciones (generado)
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
-tests/                        pytest (34 tests)
+tests/                        pytest (103 tests)
 ```
 
 ## Decisiones de diseño

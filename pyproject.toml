@@ -24,6 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 robot = ["lerobot"]       # only needed on the machine connected to the SO-101
+sim = ["mujoco>=3.2"]     # MuJoCo simulation (scripts/simulate_mujoco.py)
 
 [tool.setuptools.packages.find]
 include = ["so101_tpgmm*"]

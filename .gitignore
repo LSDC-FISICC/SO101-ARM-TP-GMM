@@ -6,3 +6,6 @@ __pycache__/
 # Raw dataset and generated outputs (re-downloadable / re-generatable)
 data/raw/
 outputs/
+
+# MuJoCo robot model (scripts/fetch_so101_mujoco.sh)
+third_party/so101_mujoco/
