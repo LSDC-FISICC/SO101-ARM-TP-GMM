@@ -25,7 +25,7 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 1 | Cinemática: FK desde el URDF e IK numérica (posición + yaw, límites, pitch suave) → [`docs/kinematics_report.md`](docs/kinematics_report.md) | ✅ |
 | 2 | Segmentación en ciclos y primitivas (approach+grasp, transport+release) con filtros físicos → [`docs/segmentation_report.md`](docs/segmentation_report.md) | ✅ |
 | 3 | Visión con la cámara fija: detección HSV, yaw plegado, homografía con RANSAC, validación de escena → [`docs/vision_report.md`](docs/vision_report.md) | ✅ |
-| 4 | TP-GMM en numpy (EM + GMR con producto de Gaussianas, BIC) y, en paralelo, planificador por IK sobre las mismas primitivas | pendiente |
+| 4 | TP-GMM en numpy (EM + GMR, producto de Gaussianas, BIC): segmentado (principal) y monolítico; en paralelo, planificador por IK sobre las mismas primitivas → [`docs/tpgmm_report.md`](docs/tpgmm_report.md) | ✅ |
 | 5 | Evaluación leave-one-out, inferencia desde imagen y stub del robot | pendiente |
 
 ## Instalación
@@ -160,7 +160,13 @@ so101_tpgmm/
     calibration.py            homografía con RANSAC desde el propio dataset
     scene.py                  frame de referencia, validación de escena, asociación ciclo↔cubo
     draw.py                   dibujos de depuración
-  tpgmm/, robot/              (fases siguientes)
+  tpgmm/
+    gmm.py                    densidades, producto de Gaussianas, GMR
+    tpgmm.py                  TP-GMM: EM, inicialización k-means en el tiempo, BIC, reproducción
+    demos.py                  demostraciones, marcos cubo/caja, simetría de 90° del cubo
+    policy.py                 política segmentada / monolítica, continuidad entre primitivas
+  planner/ik_planner.py       planificador geométrico por waypoints (línea base)
+  robot/                      (fase siguiente)
 scripts/
   inspect_dataset.py          Fase 0: reporte, figuras y CSV por episodio
   calibrate_camera_grid.py    calibración métrica con la cuadrícula
@@ -168,6 +174,7 @@ scripts/
   segment_dataset.py          Fase 2: tabla de ciclos/primitivas, reporte y figuras
   vision_pipeline.py          Fase 3: detección, calibración, marcos del cubo por ciclo, reporte
   debug_detections.py         imágenes con las detecciones dibujadas (episodios o cualquier imagen)
+  train.py                    Fase 4: entrena TP-GMM segmentado, monolítico y el planificador por IK
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)
@@ -177,6 +184,7 @@ docs/
   segmentation_cycles.csv     un registro por ciclo: índices, banderas y puntos clave
   vision_report.md            visión y calibración píxel→base (generado)
   cube_frames.csv             marco del cubo por ciclo (visión y FK), color y banderas
+  tpgmm_report.md             entrenamiento, selección por BIC, componentes (generado)
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
 tests/                        pytest (34 tests)
