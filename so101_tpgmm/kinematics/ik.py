@@ -42,6 +42,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import least_squares
 
+from so101_tpgmm.kinematics.analytic import AnalyticIK
 from so101_tpgmm.kinematics.fk import SO101Kinematics
 
 
@@ -165,6 +166,7 @@ class SO101IK:
         self.pitch_weight = pitch_weight
         self.default_pitch = default_pitch
         self.pan_axis_xy = kin.chain[0].origin[:2, 3].copy()
+        self.analytic = AnalyticIK(kin)
         # Canonical (lift, elbow, wrist_flex) postures [deg] for target-aware seeds:
         # reaching far/low, mid, near/high, folded.
         self._postures = np.deg2rad([[30, -40, 90], [0, 0, 70], [-40, 40, 80], [-80, 90, 70], [60, -90, 60]])
@@ -230,8 +232,9 @@ class SO101IK:
             r = p_target[:2] - self.pan_axis_xy
             r = r / max(np.linalg.norm(r), 1e-9)
             z_t = np.r_[np.sin(pitch) * r, -np.cos(pitch)]
-        seeds = ([np.asarray(q_seed, dtype=np.float64)] if q_seed is not None else []) + self._target_seeds(
-            p_target, yaw_target)
+        seeds = ([np.asarray(q_seed, dtype=np.float64)] if q_seed is not None else [])
+        seeds += self._analytic_seeds(p_target, yaw_target, pitch, q_seed)
+        seeds += self._target_seeds(p_target, yaw_target)
         best: IKResult | None = None
         for k, seed in enumerate(seeds[: max_restarts + 1]):
             x0 = np.clip(seed, self.lower + 1e-9, self.upper - 1e-9)
@@ -274,6 +277,23 @@ class SO101IK:
     def _azimuth(self, q: np.ndarray) -> float:
         d = self.kin.fk_position(q)[:2] - self.pan_axis_xy
         return float(np.arctan2(d[1], d[0]))
+
+    def _analytic_seeds(self, p_target, yaw_target, pitch, q_near) -> list[np.ndarray]:
+        """Closed-form solutions (corrected Rivas 2026 decoupling) inside the limits,
+        closest to ``q_near`` first. Exact for the full pose they are built from."""
+        if yaw_target is None:
+            return []
+        sols = self.analytic.solve_task(p_target, yaw_target, self.default_pitch if pitch is None else pitch)
+        out = []
+        for q in sols:
+            for k in (-1, 0, 1):  # wrist_roll may need a 2*pi shift to enter its range
+                qq = q.copy()
+                qq[4] += 2 * np.pi * k
+                if np.all(qq >= self.lower) and np.all(qq <= self.upper):
+                    out.append(qq)
+        if q_near is not None:
+            out.sort(key=lambda qq: float(np.max(np.abs(qq - q_near))))
+        return out
 
     def _target_seeds(self, p_target: np.ndarray, yaw_target: float | None) -> list[np.ndarray]:
         """Seeds with the pan pointing at the target and the roll matching the requested yaw."""

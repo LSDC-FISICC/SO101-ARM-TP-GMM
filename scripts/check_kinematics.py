@@ -150,7 +150,10 @@ def main() -> None:
     A(f"- **Success:** position error ≤ {ik.pos_tol * 1e3:.1f} mm, yaw error ≤ {np.rad2deg(ik.yaw_tol):.1f}°, "
       "inside limits, yaw defined at the solution. Otherwise the target is flagged — never clipped.\n")
     A("## Solver\n")
-    A("Bounded least squares (`scipy` TRF) with the analytic geometric Jacobian (checked against finite "
+    A("Seeds come first from the **closed-form decoupling IK** (`kinematics/analytic.py`, the corrected "
+      "model of Rivas 2026, see `kinematics_paper_review.md`): both elbow branches, filtered by joint limits, "
+      "closest to the previous posture first. Then bounded least squares (`scipy` TRF) with the analytic "
+      "geometric Jacobian (checked against finite "
       "differences in the tests). Two stages: (1) position + yaw + **soft pitch target** choose the posture; "
       "(2) task-priority polish drives position/yaw error to zero from there. Seeds point the pan at the "
       "target and set the roll from the requested yaw; restarts are tried only if needed. Trajectories are "
