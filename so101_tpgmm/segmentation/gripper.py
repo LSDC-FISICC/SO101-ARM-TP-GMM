@@ -75,7 +75,9 @@ class GripperEvents:
     """Detector output for one episode."""
 
     cycles: list[GraspCycle] = field(default_factory=list)
+    # Closed but not holding, followed by a re-opening: missed grasp / regrasp.
     empty_closures: list[tuple[int, int, float]] = field(default_factory=list)  # (start, end, level)
+    # Hold-level plateau never followed by an opening (cube kept, or partial closure in the air).
     unreleased_holds: list[tuple[int, int, float]] = field(default_factory=list)
     open_runs: list[tuple[int, int]] = field(default_factory=list)
 
@@ -140,7 +142,7 @@ def detect_gripper_events(g: np.ndarray, fps: float, params: GripperParams | Non
         level = float(np.median(seg[settle : settle + int(fps)]))
         holding = p.hold_min <= level <= p.close_threshold and (e - s) >= min_hold
         if not holding:
-            if next_open or level < p.hold_min:
+            if next_open:  # final rest closures are not failed grasps
                 ev.empty_closures.append((s, e, level))
             continue
         if not next_open:

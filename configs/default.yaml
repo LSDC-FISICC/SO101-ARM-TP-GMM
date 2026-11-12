@@ -25,11 +25,9 @@ kinematics:
   tcp_link: gripper_frame_link
   joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]
   # Centre of a grasped cube expressed in the TCP (gripper_frame_link) frame [m].
-  # PRELIMINARY: jointly fitted with the pixel->XY homography on 392 grasps (Phase 0).
-  # The no-offset model is inconsistent with the measured camera placement; this one
-  # reproduces camera height (55 cm), lens footprint (24 cm from pan axis) and the
-  # camera stand position (~46-48 cm) simultaneously.
-  grasp_offset_tcp: [-0.0074, -0.0171, -0.0207]
+  # PRELIMINARY: jointly fitted with the pixel->XY homography (Phase 0, docs/dataset_report.md §6).
+  # Lowers the homography error 10.6 -> 8.4 mm; bootstrap 95% CI ~ +-2-5 mm per axis.
+  grasp_offset_tcp: [-0.0075, -0.0172, -0.0169]
 
 scene:
   cube_side: 0.04            # [m] measured
@@ -39,13 +37,14 @@ scene:
   camera_stand_from_robot_base: 0.46     # [m] measured by tape (to the stand base)
 
 camera:
-  # PRELIMINARY extrinsics/intrinsics from the dataset (homography + known height),
+  # PRELIMINARY intrinsics/extrinsics from the dataset (homography + measured height),
   # principal point at the image centre, square pixels, no distortion model.
+  # Well determined: focal (given the height). Poorly determined: lens x/y and tilt
+  # (bootstrap 95% CI: x 21.8-28.3 cm, tilt 2-6 deg). See docs/dataset_report.md §6.
   image_size: [640, 480]
-  focal_px: 503
-  lens_position_base: [0.279, -0.015, null]   # [m] x, y in base frame; z ~0.55 above table
-  optical_axis_tilt_deg: 4.8
-  scale_mm_per_px_center: 1.02
+  focal_px: 498
+  lens_position_base: [0.251, -0.015, null]   # [m] x, y in base frame; z ~0.55 above table
+  optical_axis_tilt_deg: 3.5
 
 gripper:
   # Gripper values are in LeRobot RANGE_0_100 (0 = calibrated min = closed).
@@ -63,3 +62,4 @@ inspection:
   output_report: docs/dataset_report.md
   figures_dir: docs/figures
   n_video_check_episodes: 8   # episodes whose first/last frame is decoded and checked
+  camera_bootstrap: 60        # bootstrap resamples for the camera-geometry uncertainty
