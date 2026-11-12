@@ -99,6 +99,41 @@ segmentation:
   quiet_release_tail_s: 0.3  # P2 end after a release without a detectable opening
   output_csv: outputs/segmentation.csv
 
+vision:
+  # Fixed camera only. HSV in OpenCV units (H 0-179, S/V 0-255); ranges set from the
+  # measured cube statistics (Phase 3 report). Red wraps around 0/180: two intervals.
+  colors:
+    red:    {hue: [[0, 10], [170, 179]], min_s: 120, min_v: 50}
+    yellow: {hue: [[18, 35]], min_s: 120, min_v: 50}
+    green:  {hue: [[40, 90]], min_s: 120, min_v: 50}
+    # No blue cube appears in this dataset; the floor tape is blue (S ~110, V ~96).
+    # Keep a high value floor so tape is rejected; the shape filters reject strips.
+    blue:   {hue: [[100, 130]], min_s: 150, min_v: 130}
+  area_px: [900, 2600]       # cube blobs measured 1167-1721 px (p1-p99)
+  max_aspect: 1.6            # minAreaRect long/short side
+  min_fill: 0.6              # blob area / minAreaRect area
+  open_kernel: 3
+  close_kernel: 5
+  exclude_boxes: [[440, 0, 640, 115], [250, 400, 410, 480]]   # box (yellow object inside), camera stand
+  intrinsics: null           # optional {K: [[fx,0,cx],[0,fy,cy],[0,0,1]], dist: [k1,k2,p1,p2,k3]}
+  scene:
+    reference_margin_frames: 2       # reference frame = motion onset - this
+    home_tolerance_m: 0.05           # TCP vs median home TCP (rest posture varies, TCP within ~3 cm)
+    static_window_s: 0.5
+    static_diff_threshold: 40
+    static_max_fraction: 0.002
+    arm_home_roi_px: [265, 0, 375, 135]
+    expected_area_ratio: [0.7, 2.0]  # blob area / (cube side in px)^2
+  calibration:
+    ransac_threshold: 0.015  # [m]
+    fit_tcp_offset: true
+    output: outputs/vision_calibration.yaml
+  association_max_distance: 0.03     # [m] detected cube <-> FK grasp position
+  # Vision (reference frame) vs FK cube centre at contact: larger => the gripper pushed the
+  # cube before closing, the demo is inconsistent with the initial cube frame -> not usable.
+  max_vision_fk_error_mm: 20
+  frames_csv: outputs/cube_frames.csv
+
 inspection:
   output_report: docs/dataset_report.md
   figures_dir: docs/figures
