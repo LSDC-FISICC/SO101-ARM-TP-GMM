@@ -198,6 +198,9 @@ so101_tpgmm/
     cube_symmetry.py          elección entre las 4 orientaciones equivalentes del cubo
     ds.py                     sistema dinámico GMR-DS (campo vectorial) a partir de las demostraciones
   planner/ik_planner.py       planificador geométrico por waypoints (línea base)
+  lpvds/
+    lpvds.py                  LPV-DS estable por construcción (Lyapunov cuadrático), DS escalares
+    policy.py                 política LPV-DS por primitiva en el marco del objetivo, gripper por estado
   evaluation/metrics.py       métricas: RMSE, error de agarre/soltado, factibilidad IK
   inference.py                imagen → cubos → trayectorias → articulaciones (orden de colores)
   robot/so101_runner.py       stub para ejecutar en SO101Follower (LeRobot), con modo dry-run
@@ -212,6 +215,8 @@ scripts/
   evaluate_offline.py         Fase 5: validación leave-one-out por ciclo y figuras
   infer.py                    Fase 5: imagen (o episodio) → .npz/.csv con la trayectoria articular
   plot_ds_field.py            campo vectorial y divergencia del DS aprendido (diagnóstico)
+  train_lpvds.py              entrena LPV-DS y genera su reporte (campo y conjuntos de nivel de Lyapunov)
+  perturbation_benchmark.py   robustez: control indexado en el tiempo vs LPV-DS ante perturbaciones
 docs/
   dataset_report.md           reporte del dataset (generado)
   camera_calibration.md       calibración de la cámara (generado)
@@ -224,6 +229,8 @@ docs/
   tpgmm_report.md             entrenamiento, selección por BIC, componentes (generado)
   evaluation_report.md        comparación leave-one-out de los tres modelos (generado)
   ds_field.md                 campo vectorial / divergencia del GMR-DS (generado)
+  lpvds_report.md             modelo LPV-DS (generado)
+  perturbation_report.md      prueba de perturbaciones (generado)
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
 tests/                        pytest (34 tests)

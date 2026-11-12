@@ -93,6 +93,23 @@ def fit_primitive(demos: list[Demo], name: str, K: int | None = None) -> tuple[P
     return PrimitiveDS(model, heading, pitch, gm, v_max, float(np.median([d.duration for d in demos])), v_min), info
 
 
+class GripperLatch:
+    """Once the jaws have opened during a primitive, keep them open until arrival.
+
+    The state-dependent map g(d) is smooth: if a perturbation pushes the arm away when it is already
+    near the cube, g(d) at the new distance can be almost closed and the jaws would close in the air.
+    The operator never did that (open once, close on the cube), so the command is latched at 90 % of
+    the largest opening reached so far; arrival (settle phase) releases the latch.
+    """
+
+    def __init__(self, threshold: float = 25.0) -> None:
+        self.peak, self.threshold = 0.0, threshold
+
+    def __call__(self, g: float) -> float:
+        self.peak = max(self.peak, g)
+        return max(g, 0.9 * self.peak) if self.peak >= self.threshold else g
+
+
 class LPVDSPolicy:
     """Closed-loop LPV-DS policy (see module docstring)."""
 
@@ -165,8 +182,11 @@ class LPVDSPolicy:
             p = self.prims[name]
             t_max = self.meta["max_duration_factor"] * p.median_duration
             t0, settle = t, None
+            latch = GripperLatch() if name == "approach_grasp" else None
             while True:
                 v, hd, td, g = self.step(name, state, frames[name])
+                if latch is not None:
+                    g = latch(g)
                 if settle is not None:  # arrived: stop and actuate the gripper (close / open)
                     v, hd, td, g = np.zeros(3), 0.0, 0.0, p.gripper_at(0.0)
                 state[:3] += dt * v

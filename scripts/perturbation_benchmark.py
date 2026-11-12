@@ -43,7 +43,7 @@ from so101_tpgmm.config import load_config, resolve_path  # noqa: E402
 from so101_tpgmm.data.lerobot_dataset import LeRobotV3Dataset  # noqa: E402
 from so101_tpgmm.evaluation.metrics import closing_index  # noqa: E402
 from so101_tpgmm.kinematics.fk import SO101Kinematics  # noqa: E402
-from so101_tpgmm.lpvds.policy import LPVDSPolicy  # noqa: E402
+from so101_tpgmm.lpvds.policy import GripperLatch, LPVDSPolicy  # noqa: E402
 from so101_tpgmm.planner.ik_planner import IKPlanner  # noqa: E402
 from so101_tpgmm.tpgmm.demos import build_demos, rot_z, training_table  # noqa: E402
 from so101_tpgmm.tpgmm.policy import TPGMMPolicy  # noqa: E402
@@ -74,8 +74,10 @@ def unit_dirs(rng, n, vertical=False):
 class TimeIndexed:
     """Tracking controller for a time-indexed approach reference."""
 
-    def __init__(self, policy, kp: float):
-        self.policy, self.kp = policy, kp
+    def __init__(self, policy, kp: float, phase_alpha: float = 0.0):
+        """``phase_alpha`` > 0 enables phase stopping: the reference clock advances at
+        dτ/dt = 1 / (1 + α‖r(τ) − x‖²), so the reference (and its gripper) wait for the robot."""
+        self.policy, self.kp, self.alpha = policy, kp, phase_alpha
 
     def reference(self, cube, yaw, start, heading):
         ro = self.policy.rollout(cube, yaw, start=start, dt=DT, heading=heading)
@@ -88,20 +90,21 @@ class TimeIndexed:
         x = start[:3].copy() + sc.get("start_offset", 0)
         X, G, U = [x.copy()], [ref[0, 4]], []
         n = len(ref)
-        stalled_until = -1
-        k_ref = 0
+        tau = 0.0  # reference time (index units)
         for k in range(int(t_cap / DT)):
             t = k * DT
             if sc.get("cube_move_t") is not None and abs(t - sc["cube_move_t"]) < DT / 2:
                 cube = cube + sc["cube_move"]
                 new = self.reference(cube, yaw, start, heading)
-                ref = np.vstack([ref[: min(k, len(ref))], new[min(k, len(new) - 1):]])
+                j = int(round(tau))
+                ref = np.vstack([ref[: min(j, len(ref))], new[min(j, len(new) - 1):]])
                 n = len(ref)
             if sc.get("push_t") is not None and abs(t - sc["push_t"]) < DT / 2:
                 x = x + sc["push"]
-            i = min(k, n - 1)
+            i = min(int(round(tau)), n - 1)
             r, r_next = ref[i, :3], ref[min(i + 1, n - 1), :3]
-            u = (r_next - r) / DT + self.kp * (r - x)
+            rate = 1.0 / (1.0 + self.alpha * float(np.sum((r - x) ** 2))) if self.alpha > 0 else 1.0
+            u = rate * (r_next - r) / DT + self.kp * (r - x)
             U.append(np.linalg.norm(u))
             un = np.linalg.norm(u)
             if un > v_max:
@@ -110,8 +113,8 @@ class TimeIndexed:
                 u = np.zeros(3)
             x = x + DT * u
             X.append(x.copy()), G.append(ref[i, 4])
-            k_ref = k
-            if k >= n - 1 + int(0.5 / DT):  # reference finished + 0.5 s settling
+            tau += rate
+            if tau >= n - 1 + 0.5 / DT:  # reference finished + 0.5 s settling
                 break
         X, G = np.array(X), np.array(G)
         ig = grasp_index(G)
@@ -128,6 +131,7 @@ class DSController:
         state = np.asarray(start, float).copy()
         state[:3] += sc.get("start_offset", 0)
         X, G, U = [state[:3].copy()], [state[4]], []
+        latch = GripperLatch()
         for k in range(int(t_cap / DT)):
             t = k * DT
             if sc.get("cube_move_t") is not None and abs(t - sc["cube_move_t"]) < DT / 2:
@@ -136,6 +140,7 @@ class DSController:
             if sc.get("push_t") is not None and abs(t - sc["push_t"]) < DT / 2:
                 state[:3] += sc["push"]
             v, hd, td, g = self.policy.step("approach_grasp", state, frames["approach_grasp"])
+            g = latch(g)
             U.append(np.linalg.norm(v))
             vn = np.linalg.norm(v)
             if vn > v_max:
@@ -164,6 +169,8 @@ def main() -> None:
     ap.add_argument("--cycles", type=int, default=80)
     ap.add_argument("--kp", type=float, default=5.0)
     ap.add_argument("--ds-tolerance", type=float, default=0.002, help="LPV-DS arrival tolerance [m]")
+    ap.add_argument("--phase-alpha", type=float, default=2500.0,
+                    help="phase stopping gain [1/m^2] (rate halves at 2 cm tracking error)")
     args = ap.parse_args()
     cfg = load_config(args.config, args.set)
     ds = LeRobotV3Dataset(resolve_path(cfg["dataset"]["local_dir"]), cfg["dataset"]["state_key"])
@@ -184,7 +191,8 @@ def main() -> None:
     T_med = lpv.prims["approach_grasp"].median_duration
     t_cap = 3.0 * T_med
     ctrls = {"TP-GMM segmented": TimeIndexed(seg, args.kp), "IK planner": TimeIndexed(planner, args.kp),
-             "LPV-DS": DSController(lpv)}
+             "LPV-DS": DSController(lpv),
+             "TP-GMM + phase stopping": TimeIndexed(seg, args.kp, phase_alpha=args.phase_alpha)}
     rng = np.random.default_rng(0)
     n = len(sub)
     dirs_start, dirs_push, dirs_cube = unit_dirs(rng, n, True), unit_dirs(rng, n), unit_dirs(rng, n)
@@ -235,7 +243,8 @@ def write_report(res, examples, r0, seg, args, v_max, T_med) -> None:
     fig_dir = resolve_path("docs/figures")
     plt.rcParams.update({"axes.grid": True, "grid.alpha": 0.3})
     ctrl = list(dict.fromkeys(res.controller))
-    colors = {"TP-GMM segmented": "#3b6ea5", "IK planner": "#2a9d4b", "LPV-DS": "#c03b3b"}
+    colors = {"TP-GMM segmented": "#3b6ea5", "IK planner": "#2a9d4b", "LPV-DS": "#c03b3b",
+              "TP-GMM + phase stopping": "#8e5ab5"}
     fig, axs = plt.subplots(3, 3, figsize=(13, 12), sharey=True)
     axs = axs.ravel()
     for ax, s in zip(axs, SCENARIOS):
@@ -267,7 +276,10 @@ def write_report(res, examples, r0, seg, args, v_max, T_med) -> None:
          f"- {res.cycle.nunique()} cycles (stratified), approach_grasp primitive, kinematic TCP simulation at 30 Hz. "
          f"All controllers share the speed limit {v_max:.2f} m/s (99th percentile of demonstrated approach speeds).",
          f"- Time-indexed controllers track their reference with u = ṙ(t) + Kp(r(t) − x), Kp = {args.kp} 1/s; the gripper "
-         "follows the reference's time profile. LPV-DS: u = f(x); gripper from the distance to the attractor.",
+         "follows the reference's time profile. **TP-GMM + phase stopping**: same reference, but its clock advances at "
+         f"dτ/dt = 1/(1 + α‖r(τ) − x‖²), α = {args.phase_alpha:.0f} 1/m² (half speed at 2 cm of tracking error), so the "
+         "reference and its gripper wait for the robot. LPV-DS: u = f(x); gripper from the distance to the attractor, "
+         "latched open once opened and closed on arrival.",
          f"- Scenarios, timed at the same phase of each controller's own nominal approach (median demonstrated "
          f"approach {T_med:.1f} s): start offset 5 cm (random direction, partly upwards); push 4 cm "
          f"(horizontal) at 50 % (`push_mid`) or 85 % (`push_late`) of the approach; stall 1 s at 30 % (`stall_1s`) or "
