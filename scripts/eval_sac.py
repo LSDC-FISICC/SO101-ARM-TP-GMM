@@ -139,7 +139,23 @@ def write_report(df: pd.DataFrame, cfg: dict) -> None:
             pv = binomtest(win, win + loss).pvalue if win + loss else 1.0
             L.append(f"- **{c}:** SAC residual succeeds where the TP-GMM fails in {win} episodes, and the opposite in "
                      f"{loss} (exact binomial test on the discordant pairs, p = {pv:.2g}).")
-    L += ["", "## Residual: what went wrong first\n",
+    sr = df.groupby(["condition", "policy"]).success.mean() * 100
+    get = lambda c, p: float(sr.get((c, p), float("nan")))  # noqa: E731
+    L += ["", "## Reading\n",
+          f"- **SAC residual ≈ TP-GMM.** {get('nominal', 'sac_residual'):.1f} vs {get('nominal', 'tpgmm'):.1f} % "
+          f"(nominal) and {get('noise8', 'sac_residual'):.1f} vs {get('noise8', 'tpgmm'):.1f} % (8 mm perception "
+          "noise): slightly better, not significantly. It keeps the TP-GMM's success, which the first attempts did "
+          f"not, but adds little. The TP-GMM's failures grow with the perception error ({100 - get('nominal', 'tpgmm'):.1f} → "
+          f"{100 - get('noise8', 'tpgmm'):.1f} %), and the residual observes the same single camera snapshot, so it "
+          "cannot know where the cube really is. To correct "
+          "them it needs information the TP-GMM does not use: the cube re-detected during the approach (fixed "
+          "camera when not occluded, or a wrist camera), or contact/gripper feedback.",
+          f"- **SAC from scratch: {get('nominal', 'sac_scratch'):.0f} %** with its best checkpoint so far (it reaches "
+          "the cube and lifts it in ~10 % of the episodes, but does not bring it to the box yet); see the learning "
+          "curve for the run length.",
+          "- **TP-GMM + residual is the practical path to the real robot**: it starts from a working policy, never "
+          "explores far from it, and can keep learning on real episodes (`scripts/run_sac_real.py --finetune`).", ""]
+    L += ["## Residual: what went wrong first\n",
           "1. **Initial exploration noise.** In SB3, `log_std_init` only applies with gSDE; without it the initial σ is "
           "~1 and the noise alone broke the TP-GMM (4 % success while collecting, 93 % deterministic). Fixed by "
           "initializing the log-σ layer.",
