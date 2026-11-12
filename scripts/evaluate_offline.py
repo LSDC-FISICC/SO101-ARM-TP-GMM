@@ -42,6 +42,7 @@ from so101_tpgmm.data.lerobot_dataset import LeRobotV3Dataset  # noqa: E402
 from so101_tpgmm.evaluation.metrics import cycle_metrics, ik_feasibility  # noqa: E402
 from so101_tpgmm.kinematics.fk import SO101Kinematics  # noqa: E402
 from so101_tpgmm.kinematics.ik import ik_from_config  # noqa: E402
+from so101_tpgmm.tpgmm.cube_symmetry import decision_margin, heading_target  # noqa: E402
 from so101_tpgmm.tpgmm.demos import build_demos, canonical_cube_yaw, choose_cube_heading, training_table  # noqa: E402
 from so101_tpgmm.tpgmm.policy import TPGMMPolicy  # noqa: E402
 from train import fit_policies  # noqa: E402
@@ -81,11 +82,17 @@ def run_fold(i: int) -> list[dict]:
     durs = {"approach_grasp": dA.duration, "transport_release": dT.duration, "cycle": dA.duration + dT.duration}
     _, k_pred = choose_cube_heading(float(r.vision_yaw), cube[:2], np.asarray(ctx["pan_xy"]), ctx["heading_offset"])
     _, k_true = canonical_cube_yaw(float(r.vision_yaw), float(dA.cube[3]))
+    margin = decision_margin(float(r.vision_yaw), heading_target(cube[:2], np.asarray(ctx["pan_xy"]), ctx["heading_offset"]))
     rows = []
     for name, pol in (("segmented", seg), ("monolithic", mono), ("ik_planner", planner)):
         ro = pol.rollout(cube, float(r.vision_yaw), start=start, durations=durs)
         m = cycle_metrics(ro, dA, dT, monolithic=(name == "monolithic"))
         m.update(ik_feasibility(ro, ik, q0))
+        # oracle: the equivalent cube yaw the operator actually used (upper bound for any choice rule)
+        ro_o = pol.rollout(cube, float(r.vision_yaw), start=start, durations=durs, heading=float(dA.cube[3]))
+        mo = cycle_metrics(ro_o, dA, dT, monolithic=(name == "monolithic"))
+        m.update({f"{k}_oracle_k": mo[k] for k in ("grasp_err_mm", "rmse_pos_mm", "grasp_heading_err_deg")})
+        m["k_margin_deg"] = float(np.degrees(margin))
         m.update(model=name, episode=int(r.episode), color=r.color, cube_x=cube[0], cube_y=cube[1],
                  k_correct=bool(k_pred == k_true), fit_s=fit_s)
         rows.append(m)
@@ -238,16 +245,32 @@ def write_report(res: pd.DataFrame, cfg: dict, n_total: int, K: dict) -> None:
       f"{100 * (1 - (by['ik_planner'].ik_feasible == 1).mean()):.0f} % of its cycles contain an IK-infeasible point.")
     A(f"- **Release:** no significant difference; all three are bounded by the spread of the demonstrated releases "
       "in the box (~2 cm), which the box frame cannot explain (the operator dropped the cube anywhere in it).")
-    A(f"- **Cube-yaw choice (90° symmetry):** wrong in {len(wrong)}/{len(seg_)} cycles. There the heading error is "
-      f"{wrong.grasp_heading_err_deg.median():.0f}° (median, vs {right.grasp_heading_err_deg.median():.0f}°) and the "
-      f"grasp error doubles ({wrong.grasp_err_mm.median():.0f} vs {right.grasp_err_mm.median():.0f} mm), because the "
-      "cube frame also orients the approach and contact offset. These grasps are still physically valid (rotated by "
-      "90°), but they differ from what the operator did; a better rule (e.g. the yaw closest to the current wrist "
-      "heading, or the one with the smallest wrist rotation) is the most direct improvement.")
+    A(f"- **Cube-yaw choice (90° symmetry):** see the next section.")
     A("- **Error floors:** the grasp error is bounded below by the vision error (~8 mm median vs FK, "
       "`vision_report.md`) and by how consistently the operator grasped. Large errors are more frequent on the "
       "robot's right side close to the base (`eval_by_position.png`), where vision is also least accurate and cubes "
       "were pushed more often, but they also occur elsewhere.")
+    A("\n## Choice among the 4 equivalent cube yaws\n")
+    A("A cube can be grasped with the jaws along any of its 4 face normals. The execution rule picks the candidate "
+      "closest to (cube azimuth + learned heading offset); its *margin* is the distance to the 45° decision "
+      "boundary. Alternatives tried on the 366 training cycles (cross-validated): optimized offset 91.3 %, "
+      "offset linear in the azimuth 92.1 %, k-NN offset by position 89.3 %, wrist heading at rest 71.6 %, vs "
+      "91.8 % for the rule used — none is meaningfully better (`so101_tpgmm/tpgmm/cube_symmetry.py`).\n")
+    seg_m = by["segmented"]
+    A("| decision margin | cycles | agreement with the operator | grasp err, rule [mm] | grasp err, oracle yaw [mm] |")
+    A("|---|---|---|---|---|")
+    for lo, hi in ((0, 10), (10, 20), (20, 46)):
+        s_ = seg_m[(seg_m.k_margin_deg >= lo) & (seg_m.k_margin_deg < hi)]
+        if len(s_):
+            A(f"| {lo}–{min(hi, 45)}° | {len(s_)} | {100 * s_.k_correct.mean():.0f} % | {s_.grasp_err_mm.median():.1f} | "
+              f"{s_.grasp_err_mm_oracle_k.median():.1f} |")
+    A(f"| all | {len(seg_m)} | {100 * seg_m.k_correct.mean():.0f} % | {seg_m.grasp_err_mm.median():.1f} | "
+      f"{seg_m.grasp_err_mm_oracle_k.median():.1f} |")
+    A("\nThe disagreements concentrate where the margin is small: there two grasps are equally plausible and the "
+      "operator's choice is not predictable from the geometry. A grasp rotated by 90° is still a valid grasp of a "
+      "cube, but it differs from the demonstration (contact offset and approach rotate with it), which is why the "
+      "grasp error grows. At inference, when the margin is below `inference.ambiguity_margin_deg`, both options are "
+      "planned and the IK-feasible one with the least joint motion is executed.")
     resolve_path("docs/evaluation_report.md").write_text("\n".join(L) + "\n", encoding="utf-8")
 
 

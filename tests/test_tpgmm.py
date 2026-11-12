@@ -166,3 +166,14 @@ def test_planner_save_load(tmp_path):
     a = plan.rollout(d.cube[:3], d.cube[3], start=d.X[0, 1:])
     b = p2.rollout(d.cube[:3], d.cube[3], start=d.X[0, 1:])
     np.testing.assert_allclose(a.Y, b.Y)
+
+
+def test_cube_symmetry_margin_and_ambiguity():
+    from so101_tpgmm.tpgmm.cube_symmetry import ambiguous_candidates, candidates, decision_margin, heading_target
+
+    assert np.allclose(np.sort(np.degrees(candidates(np.radians(10)))), [-170, -80, 10, 100])
+    assert np.degrees(decision_margin(np.radians(10), np.radians(10))) == pytest.approx(45)  # unambiguous
+    assert np.degrees(decision_margin(np.radians(10), np.radians(55))) == pytest.approx(0, abs=1e-9)  # boundary
+    assert len(ambiguous_candidates(np.radians(10), np.radians(52), np.radians(10))) == 2
+    assert len(ambiguous_candidates(np.radians(10), np.radians(20), np.radians(10))) == 1
+    assert heading_target(np.array([0.0, 0.2]), np.zeros(2), 0.1) == pytest.approx(np.pi / 2 + 0.1)

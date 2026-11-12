@@ -168,6 +168,9 @@ inference:
   return_home_s: 2.0         # joint-space return to home between cubes
   dt: 0.0333                 # 30 Hz, like the dataset
   require_full_ik: true      # skip a cube if any trajectory point has no IK solution
+  # Cube 90-degree symmetry: when the two best equivalent yaws are within this margin of the
+  # decision boundary, plan both and keep the IK-feasible one with least joint motion.
+  ambiguity_margin_deg: 10.0
   output_dir: outputs/inference
 
 inspection:

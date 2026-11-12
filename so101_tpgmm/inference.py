@@ -19,6 +19,7 @@ import numpy as np
 
 from so101_tpgmm.kinematics.ik import SO101IK, approach_pitch, tool_yaw
 from so101_tpgmm.planner.ik_planner import min_jerk
+from so101_tpgmm.tpgmm.cube_symmetry import ambiguous_candidates, heading_target
 from so101_tpgmm.tpgmm.demos import heading_from_tool_yaw, tool_yaw_from_heading
 from so101_tpgmm.vision.detection import CubeDetection, DetectorParams, detect_cubes
 from so101_tpgmm.vision.geometry import PixelToBase
@@ -38,6 +39,8 @@ class CubePlan:
     status: str = "planned"  # planned | skipped: <reason>
     ik_feasible: float = float("nan")
     n_samples: int = 0
+    grasp_yaw: float = float("nan")  # chosen equivalent cube yaw (jaw heading frame) [rad]
+    ambiguous: bool = False  # two equivalent yaws were close: chosen by IK feasibility / joint motion
 
 
 @dataclass
@@ -106,9 +109,19 @@ def plan_from_image(rgb: np.ndarray, policy, ik: SO101IK, p2b: PixelToBase, cube
             cp.status = "skipped: partial blob (cube partly hidden or lost in the mask)"
             continue
         start = cartesian_state(ik, q, g)
-        ro = policy.rollout(cp.position, cp.yaw, start=start, dt=dt)
-        res = ik.solve_trajectory(ro.Y[:, :3], tool_yaw_from_heading(ro.Y[:, ro.names.index("h")]), np.deg2rad(q),
-                                  max_restarts=3, pitch=ro.Y[:, ro.names.index("pitch")] if "pitch" in ro.names else None)
+        target = heading_target(cp.position[:2], np.asarray(policy.meta["pan_xy"]), policy.meta["heading_offset"])
+        options = ambiguous_candidates(cp.yaw, target, np.deg2rad(icfg.get("ambiguity_margin_deg", 10.0)))
+        cp.ambiguous = len(options) > 1
+        best = None
+        for heading in options:  # with an ambiguous cube, keep the feasible option with least joint motion
+            ro_c = policy.rollout(cp.position, cp.yaw, start=start, dt=dt, heading=heading)
+            res_c = ik.solve_trajectory(ro_c.Y[:, :3], tool_yaw_from_heading(ro_c.Y[:, ro_c.names.index("h")]),
+                                        np.deg2rad(q), max_restarts=3,
+                                        pitch=ro_c.Y[:, ro_c.names.index("pitch")] if "pitch" in ro_c.names else None)
+            score = (res_c.success.mean(), -float(np.abs(np.diff(res_c.q, axis=0)).sum()))
+            if best is None or score > best[0]:
+                best = (score, ro_c, res_c, heading)
+        _, ro, res, cp.grasp_yaw = best
         cp.ik_feasible, cp.n_samples = res.feasible_fraction, len(ro.Y)
         if icfg.get("require_full_ik", True) and not res.success.all():
             bad = np.flatnonzero(~res.success)
@@ -138,6 +151,7 @@ def save_plan(plan: Plan, path_stem, meta: dict) -> None:
     stem = Path(path_stem)
     stem.parent.mkdir(parents=True, exist_ok=True)
     cubes = [{"color": c.color, "position": c.position.tolist(), "yaw_deg": float(np.degrees(c.yaw)),
+              "grasp_yaw_deg": float(np.degrees(c.grasp_yaw)), "ambiguous": c.ambiguous,
               "order": c.order, "status": c.status, "ik_feasible": c.ik_feasible} for c in plan.cubes]
     np.savez(stem.with_suffix(".npz"), t=plan.t, joints_deg=plan.joints_deg, gripper=plan.gripper,
              cartesian=plan.cartesian, phase=np.array(plan.phase), cube_index=plan.cube_index,
