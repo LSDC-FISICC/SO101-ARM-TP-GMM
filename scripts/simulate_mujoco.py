@@ -144,10 +144,63 @@ def render_video(name: str, seed: int, mode: str, out_dir: Path, size=(480, 640)
 KEYS = ["slots", "grasp_mode", "policy"]
 
 
+def render_montage(policies: list[str], seed: int, mode: str, path: Path, slots: bool = False,
+                   tile=(240, 320), stride: int = 4, fps: int = 8) -> Path:
+    """All policies on the same cube layout, side by side (2 × 2 for four), as a GIF."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    from so101_tpgmm.sim.episode import run_episode
+
+    persp, _ = _cameras()
+    persp.lookat[:] = [0.2, 0.04, 0.0]
+    persp.distance, persp.elevation = 0.55, -42.0
+    clips, captions = [], []
+    for name in policies:
+        frames: list = []
+
+        def grab(sim, frames=frames):
+            sim.renderer.update_scene(sim.data, camera=persp)
+            frames.append(sim.renderer.render().copy())
+
+        outs, _ = run_episode(_policy(name), _W["ik"], _W["cfg"], _layout(seed), _W["geom"],
+                              np.random.default_rng(10_000 + seed), grasp_mode=mode, render=tile,
+                              frame_callback=grab, render_every=stride,
+                              box_offsets=_W["cfg"]["sim"]["box_slots"] if slots else None)
+        n_ok = sum(o.in_box or o.released_over_box for o in outs)
+        clips.append(frames)
+        captions.append(f"{LABEL[name]}: {n_ok}/{len(outs)} delivered")
+    n = max(len(c) for c in clips)
+    cols = 2 if len(clips) > 1 else 1
+    rows = int(np.ceil(len(clips) / cols))
+    h, w = tile
+    try:
+        font = ImageFont.load_default(size=15)
+    except TypeError:
+        font = ImageFont.load_default()
+    out_frames = []
+    for k in range(n):
+        canvas = Image.new("RGB", (cols * w, rows * h), "white")
+        for j, c in enumerate(clips):
+            im = Image.fromarray(c[min(k, len(c) - 1)])
+            d = ImageDraw.Draw(im)
+            text = LABEL[policies[j]] if k < len(c) - 1 else captions[j]
+            d.rectangle([0, 0, w, 22], fill=(255, 255, 255))
+            d.text((6, 3), text, fill=(20, 20, 20), font=font)
+            canvas.paste(im, ((j % cols) * w, (j // cols) * h))
+        out_frames.append(canvas.quantize(colors=64, method=Image.Quantize.MEDIANCUT))
+    out_frames += [out_frames[-1]] * 15  # hold the final state
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out_frames[0].save(path, save_all=True, append_images=out_frames[1:], duration=int(1000 / fps), loop=0, optimize=True)
+    print(f"montage {path}: " + "; ".join(captions))
+    return path
+
+
 def summary(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.assign(delivered=df.in_box | df.released_over_box)
     g = df.groupby(KEYS, sort=False)
     ep = df.groupby(KEYS + ["seed"], sort=False).in_box.all().groupby(KEYS, sort=False)
     return pd.DataFrame({
+        "delivered": g.delivered.mean(),
         "cubes in box": g.in_box.mean(),
         "cubes lifted": g.lifted.mean(),
         "skipped (IK)": g.status.apply(lambda s: s.str.startswith("skipped").mean()),
@@ -180,7 +233,10 @@ def reading(df: pd.DataFrame, s: pd.DataFrame) -> list[str]:
     mean = {p: float(np.nanmean([v(sl, m, p) for sl, m in conds])) for p in pols}
     wins = {p: sum(v(sl, m, p) >= max(v(sl, m, q) for q in pols) for sl, m in conds) for p in pols}
     best = max(mean, key=mean.get)
+    dl = {p: v(False, "contact", p, "delivered") for p in pols}
     out = ["## Reading\n",
+           "- **Delivered to the box** (towers allowed; contact physics, policies as trained): " + ", ".join(
+               f"{LABEL[p]} {dl[p]:.0f} %" for p in sorted(pols, key=dl.get, reverse=True)) + ".",
            f"- **Best policy: {LABEL[best]}**: {mean[best]:.0f} % of the cubes in the box on average over the "
            f"{len(conds)} noise-free conditions, best in {wins[best]} of them; from {v(False, 'contact', best):.0f} % "
            f"(contact physics, policies as trained) to {v(True, 'assist', best):.0f} % (box slots, grasp assist). "
@@ -301,11 +357,14 @@ def write_report(df: pd.DataFrame, cfg: dict, args) -> None:
          "apart): the task parameter is changed at execution, without retraining.",
          "", "## Results\n",
          f"{int(s['n episodes'].max())} episodes × {cfg['sim']['n_cubes']} cubes per policy and condition, same "
-         "layouts for all. Cube success = inside the box at the end (resting on another cube counts).\n",
-         "| release | grasp mode | policy | cubes in box | cubes lifted | skipped (IK) | episodes with all cubes in box | cycle time [s] |",
-         "|---|---|---|---|---|---|---|---|"]
+         "layouts for all. *Delivered* = released over the box while still held, or inside it at the end (a tower "
+         "that falls over still counts: the task is to bring the cubes to the box). *In box* = inside the walls at "
+         "the end (resting on another cube counts).\n",
+         "| release | grasp mode | policy | delivered | in box at the end | cubes lifted | skipped (IK) | episodes with all cubes in box | cycle time [s] |",
+         "|---|---|---|---|---|---|---|---|---|"]
     for (sl, m, p), r in s.iterrows():
-        L.append(f"| {'box slots' if sl else 'one point'} | {m} | {LABEL[p]} | {100 * r['cubes in box']:.0f} % | "
+        L.append(f"| {'box slots' if sl else 'one point'} | {m} | {LABEL[p]} | {100 * r['delivered']:.0f} % | "
+                 f"{100 * r['cubes in box']:.0f} % | "
                  f"{100 * r['cubes lifted']:.0f} % | {100 * r['skipped (IK)']:.0f} % | "
                  f"{100 * r['episodes all 3 in box']:.0f} % | {r['cycle time [s]']:.1f} |")
     L += ["", "![](figures/sim_outcomes.png)\n"]
@@ -361,6 +420,8 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--video", type=int, default=0, help="render the first N episodes of each policy (first mode) "
                     "to outputs/sim/videos (copy a GIF/MP4 to docs/figures to show it in the report)")
+    ap.add_argument("--montage", type=int, nargs="*", default=None,
+                    help="seeds: GIF with all --policies side by side on the same layout (docs/figures)")
     ap.add_argument("--report-only", action="store_true")
     args = ap.parse_args()
     cfg = load_config(args.config, args.set)
@@ -384,6 +445,11 @@ def main() -> None:
         df[col] = df[col].apply(lambda v: [float(x) for x in str(v).strip("[]").split(",")])
     print(summary(df[df.noise_mm == 0]).round(3).to_string())
     write_report(df, cfg, args)
+    if args.montage:
+        _setup(args.config, args.set)
+        for sd in args.montage:
+            render_montage(args.policies, sd, args.grasp_modes[0], resolve_path(f"docs/figures/sim_montage_seed{sd}.gif"),
+                           slots=args.box_slots == "on")
     if args.video:
         _setup(args.config, args.set)
         for p in args.policies:

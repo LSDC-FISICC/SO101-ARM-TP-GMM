@@ -138,23 +138,25 @@ pipeline que en el robot: articulaciones medidas → política → IK → trayec
 simulados → vuelta a casa. Modelo oficial del SO-101 (TheRobotStudio, Apache-2.0), que coincide con nuestra
 FK a menos de 4 µm. Detalle, supuestos y límites en [`docs/mujoco_sim.md`](docs/mujoco_sim.md).
 
-![TP-GMM segmentado en MuJoCo, con casillas en el recipiente](docs/figures/sim_segmented_contact_slots_seed0.gif)
+![Las cuatro políticas con la misma disposición de cubos](docs/figures/sim_montage_seed0.gif)
 
-Cubos dentro del recipiente (30 episodios × 3 cubos por condición; las mismas disposiciones para todas las
-políticas; física de contacto pura):
+30 episodios × 3 cubos por condición, con las mismas disposiciones para todas las políticas y física de
+contacto pura. **Entregados** = soltados sobre el recipiente o dentro de él al final; si se forma una torre y
+se cae, cuenta igual.
 
-| política | un punto de liberación (como se entrenó) | casillas en el recipiente | con ruido de percepción de 8 mm (casillas, agarre asistido) |
-|---|---|---|---|
-| TP-GMM segmentado | 77 % | **92 %** | **84 %** |
-| TP-GMM monolítico | 76 % | 89 % | 84 % |
-| Planificador IK | **81 %** | 82 % | 68 % |
-| LPV-DS | 59 % | 60 % | 64 % |
+| política | entregados (como se entrenó) | dentro al final, un punto de liberación | dentro al final, casillas | dentro al final, casillas + 8 mm de ruido (agarre asistido) |
+|---|---|---|---|---|
+| TP-GMM segmentado | **96 %** | 77 % | **92 %** | **84 %** |
+| TP-GMM monolítico | 87 % | 76 % | 89 % | 84 % |
+| Planificador IK | 86 % | **81 %** | 82 % | 68 % |
+| LPV-DS | 61 % | 59 % | 60 % | 64 % |
 
-- **El TP-GMM segmentado es el mejor** en tres de las cuatro condiciones sin ruido (89 % en promedio).
+- **El TP-GMM segmentado es el mejor:** entrega el 96 % de los cubos; también gana en tres de las cuatro
+  condiciones de "dentro al final".
 - **Un solo punto de liberación apila los cubos.** Cada demostración tenía un solo cubo, así que la política
-  suelta los tres en el mismo lugar y el tercero se cae de la pila. Desplazar el marco del recipiente por
-  cubo (casillas) es un cambio de parámetro de tarea en ejecución, sin reentrenar, y sube el TP-GMM de 77 a
-  92 %.
+  suelta los tres en el mismo lugar. Para la tarea no importa (se entregan igual). Si hiciera falta que
+  queden dentro, basta desplazar el marco del recipiente para cada cubo (casillas): es un cambio de
+  parámetro de tarea al ejecutar, sin reentrenar, y sube "dentro al final" de 77 a 92 %.
 - **LPV-DS agarra muchos menos cubos** (61 % frente a 97 %). La pose de reposo deja la pinza a la altura de
   la mesa, y el campo, que depende solo de la posición, va casi en horizontal hacia el cubo con la pinza aún
   cerrada y lo empuja. El TP-GMM reproduce el "subir y luego acercarse" del operador. La evaluación offline
