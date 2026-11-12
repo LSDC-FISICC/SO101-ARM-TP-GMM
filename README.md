@@ -141,6 +141,19 @@ Leave-one-out sobre los 366 ciclos utilizables (mediana; detalle y pruebas parea
 | Planificador IK | 27.8 | 11.8 | 20.9 | 93 % |
 | LPV-DS | 25.7 | 11.8 | 21.1 | 97 % |
 
+Campos aprendidos por LPV-DS, una primitiva por fila: marco del cubo (arriba) y del recipiente (abajo).
+Las líneas de flujo muestran la dirección y la rapidez del campo; las elipses grises son los conjuntos de nivel
+de la función de Lyapunov, que decrece a lo largo de todo el campo:
+
+![LPV-DS: campo y Lyapunov](docs/figures/lpvds_field.png)
+
+Las 8 Gaussianas de cada primitiva (izquierda) reparten el espacio y cada una activa un sistema lineal estable
+A_k(x − x*); el campo es su mezcla ponderada por γ_k(x). Al centro y a la derecha, el DS integrado en 3-D
+desde el inicio de 25 demostraciones (azul) frente a esas demostraciones (gris): todas convergen, y se ve el
+desborde más allá del cubo en algunas aproximaciones.
+
+![LPV-DS: Gaussianas y rollouts](docs/figures/lpvds_gaussians_rollouts.png)
+
 - **Precisión:** el LPV-DS no mejora. Llega al cubo casi igual de bien (11,8 vs 10,7 mm; el piso lo
   ponen la visión y el operador), pero sigue peor el camino demostrado: asigna una sola velocidad a cada
   posición y las demostraciones cruzan las mismas regiones a ritmos distintos.
@@ -246,6 +259,7 @@ scripts/
   infer.py                    Fase 5: imagen (o episodio) → .npz/.csv con la trayectoria articular
   plot_ds_field.py            campo vectorial y divergencia del DS aprendido (diagnóstico)
   train_lpvds.py              entrena LPV-DS y genera su reporte (campo y conjuntos de nivel de Lyapunov)
+  plot_lpvds.py               figura de Gaussianas de LPV-DS y rollouts vs demostraciones
   perturbation_benchmark.py   robustez: control indexado en el tiempo vs LPV-DS ante perturbaciones
 docs/
   dataset_report.md           reporte del dataset (generado)

@@ -104,7 +104,7 @@ def main() -> None:
     for name, s in stats.items():
         Lr.append(f"| {name} | {s['K']} | {s['max_eig']:.4f} | {s['v_rmse']:.3f} | {100 * s['conv']:.0f} % | "
                   f"{s['v_min']:.3f} / {s['v_max']:.3f} |")
-    Lr += ["", "![](figures/lpvds_field.png)\n",
+    Lr += ["", "![](figures/lpvds_field.png)\n", "Scheduling Gaussians and 3-D rollouts from demonstrated starts vs the demonstrations (`scripts/plot_lpvds.py`):\n", "![](figures/lpvds_gaussians_rollouts.png)\n",
            "The velocity RMSE stays large relative to the demonstrated speeds: the field reproduces the arched "
            "approach through its rotational part (figure), but it assigns one velocity to each position, while the "
            "demonstrations cross the same regions with different velocities (different paces and phases). What the model guarantees instead is convergence to the attractor from anywhere, and a "
