@@ -26,7 +26,8 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 2 | Segmentación en ciclos y primitivas (approach+grasp, transport+release) con filtros físicos → [`docs/segmentation_report.md`](docs/segmentation_report.md) | ✅ |
 | 3 | Visión con la cámara fija: detección HSV, yaw plegado, homografía con RANSAC, validación de escena → [`docs/vision_report.md`](docs/vision_report.md) | ✅ |
 | 4 | TP-GMM en numpy (EM + GMR, producto de Gaussianas, BIC): segmentado (principal) y monolítico; en paralelo, planificador por IK sobre las mismas primitivas → [`docs/tpgmm_report.md`](docs/tpgmm_report.md) | ✅ |
-| 5 | Evaluación leave-one-out (segmentado vs monolítico vs planificador IK), inferencia imagen → trayectoria articular, stub del robot → [`docs/evaluation_report.md`](docs/evaluation_report.md) | ✅ |
+| 5 | Evaluación leave-one-out (segmentado vs monolítico vs planificador IK vs LPV-DS), inferencia imagen → trayectoria articular, stub del robot → [`docs/evaluation_report.md`](docs/evaluation_report.md) | ✅ |
+| 6 | Alternativa estable: LPV-DS (campo de velocidades con estabilidad garantizada) y prueba de perturbaciones → [`docs/lpvds_report.md`](docs/lpvds_report.md), [`docs/perturbation_report.md`](docs/perturbation_report.md), [`docs/ds_field.md`](docs/ds_field.md) | ✅ experimental |
 
 ## Instalación
 
@@ -127,6 +128,35 @@ o en el aire).*
 - **Límites articulares:** la pose de reposo deja `shoulder_lift` en −104°, fuera del límite del
   URDF (±100°). Solo el 36 % de los frames respeta todos los límites del URDF, así que la IK usará
   la unión de los límites del URDF y el rango observado.
+
+## TP-GMM vs LPV-DS: ¿vale la pena?
+
+Leave-one-out sobre los 366 ciclos utilizables (mediana; detalle y pruebas pareadas en
+[`docs/evaluation_report.md`](docs/evaluation_report.md)):
+
+| modelo | desviación de trayectoria [mm] | error de agarre [mm] | error de liberación [mm] | ciclos 100 % factibles por IK |
+|---|---|---|---|---|
+| TP-GMM segmentado | **21.1** | **10.7** | 21.0 | 100 % |
+| TP-GMM monolítico | 25.1 | 12.8 | 21.4 | 100 % |
+| Planificador IK | 27.8 | 11.8 | 20.9 | 93 % |
+| LPV-DS | 25.7 | 11.8 | 21.1 | 97 % |
+
+- **Precisión:** el LPV-DS no mejora. Llega al cubo casi igual de bien (11,8 vs 10,7 mm; el piso lo
+  ponen la visión y el operador), pero sigue peor el camino demostrado: asigna una sola velocidad a cada
+  posición y las demostraciones cruzan las mismas regiones a ritmos distintos.
+- **Robustez** ([`docs/perturbation_report.md`](docs/perturbation_report.md), simulación cinemática del
+  TCP): el seguimiento indexado en el tiempo con realimentación resiste empujones, desplazamientos del
+  cubo y un robot más lento; falla solo ante una pausa larga cerca del agarre (el gripper cierra a 35 mm
+  del cubo). El LPV-DS es inmune a eso, pero **la detención de fase** (el reloj de la referencia espera
+  al robot) le da la misma inmunidad al TP-GMM sin cambiar el modelo.
+- **Advertencia de forma:** en ~18 % de las aproximaciones nominales el LPV-DS pasa por encima del cubo
+  y baja por el lado opuesto (demostraciones: 11 %, con desbordes mucho menores).
+- **TP-LPV-DS:** no implementado. El recipiente nunca se mueve en el dataset, así que el marco del
+  recipiente no aporta nada que aprender; solo tendría sentido con demostraciones nuevas moviéndolo.
+- **Recomendación:** mantener el TP-GMM segmentado como política principal y ejecutarlo con detención
+  de fase en el robot (hoy solo está en `scripts/perturbation_benchmark.py`; falta llevarla a
+  `robot/so101_runner.py`, que reproduce un plan abierto). El LPV-DS queda como alternativa cuando se necesite convergencia garantizada
+  desde estados lejos de las demostraciones.
 
 ## Geometría cámara ↔ robot
 
@@ -233,7 +263,7 @@ docs/
   perturbation_report.md      prueba de perturbaciones (generado)
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
-tests/                        pytest (34 tests)
+tests/                        pytest (96 tests)
 ```
 
 ## Decisiones de diseño

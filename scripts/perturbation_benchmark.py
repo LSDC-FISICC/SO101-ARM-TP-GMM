@@ -296,7 +296,7 @@ def write_report(res, examples, r0, seg, args, v_max, T_med) -> None:
          "2 s at 60 % (`stall_2s_late`); cube moved 3 cm at 40 % or 80 % with the new frame given to every controller "
          "(time-indexed ones replan the rest of their reference); `slow_robot`: the arm can only reach 40 % of the "
          "speed limit (load, low gains, a slower robot than the demonstrator's). The late variants leave the "
-         "time-indexed reference little or no time to recover. LPV-DS arrival tolerance {args.ds_tolerance * 1e3:.0f} mm.",
+         f"time-indexed reference little or no time to recover. LPV-DS arrival tolerance {args.ds_tolerance * 1e3:.0f} mm.",
          "- **Grasp deviation**: TCP position when the gripper closes vs the grasp point of the same controller "
          "without perturbation (final cube pose). Success: < 10 mm. Models trained on all usable cycles (this is a "
          "robustness test, not a generalization test).\n",

@@ -288,7 +288,7 @@ def write_report(res: pd.DataFrame, cfg: dict, n_total: int, K: dict) -> None:
           f"{lp.duration_err_s.median():+.2f} s median). Its advantages are not visible in this offline test: "
           "convergence is guaranteed and it reacts to the current state — see `perturbation_report.md` (and the "
           "path-shape caveat there: it sometimes approaches the cube from the far side).")
-    A(f"- **Release:** no significant difference; all three are bounded by the spread of the demonstrated releases "
+    A(f"- **Release:** no significant difference; all models are bounded by the spread of the demonstrated releases "
       "in the box (~2 cm), which the box frame cannot explain (the operator dropped the cube anywhere in it).")
     A(f"- **Cube-yaw choice (90° symmetry):** see the next section.")
     A("- **Error floors:** the grasp error is bounded below by the vision error (~8 mm median vs FK, "
