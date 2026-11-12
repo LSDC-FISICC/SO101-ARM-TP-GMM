@@ -59,6 +59,7 @@ class ArmGeometry:
     tcp_offset: np.ndarray  # TCP - (point on roll axis), in the TCP frame [m]
     roll_dir_in_tcp: np.ndarray  # roll axis pointing from the wrist towards the TCP, TCP frame
     roll_joint_axis_in_tcp: np.ndarray  # wrist_roll joint axis (URDF sign), TCP frame
+    tool_rotation: np.ndarray  # C = R_tcp(q = 0): R_tcp = Rz(-q1) Ry(q2+q3+q4) Rx(-q5) C
 
     @property
     def L1(self) -> float:
@@ -98,6 +99,7 @@ class ArmGeometry:
             tcp_offset=T[:3, :3].T @ (T[:3, 3] - roll_pt),
             roll_dir_in_tcp=T[:3, :3].T @ (a[4] * np.sign(np.dot(a[4], T[:3, 3] - o[3]))),
             roll_joint_axis_in_tcp=T[:3, :3].T @ a[4],
+            tool_rotation=T[:3, :3].copy(),
         )
 
 
@@ -208,3 +210,51 @@ def rivas_eq1_position(q_paper: np.ndarray, g: ArmGeometry, forearm_offset: bool
     r = g.a1 + g.l6 * c23 + l6b * s23 + g.l5 * c2 + g.l4 * s2 + g.l78 * c234
     z = g.d1 - g.l6 * s23 + l6b * c23 + g.l4 * c2 - g.l5 * s2 - g.l78 * s234
     return np.array([c1 * r, s1 * r, z])
+
+
+def _rz(a: float) -> np.ndarray:
+    c, s_ = np.cos(a), np.sin(a)
+    return np.array([[c, -s_, 0], [s_, c, 0], [0, 0, 1.0]])
+
+
+def _ry(a: float) -> np.ndarray:
+    c, s_ = np.cos(a), np.sin(a)
+    return np.array([[c, 0, s_], [0, 1.0, 0], [-s_, 0, c]])
+
+
+def _rx(a: float) -> np.ndarray:
+    c, s_ = np.cos(a), np.sin(a)
+    return np.array([[1.0, 0, 0], [0, c, -s_], [0, s_, c]])
+
+
+def closed_form_fk(q: np.ndarray, g: ArmGeometry) -> np.ndarray:
+    """Closed-form FK (LeRobot/URDF joint convention, radians) -> TCP pose (4x4, base_link).
+
+    ::
+
+        az   = -q1                      (the pan axis points down)
+        beta = q2 + q3 + q4
+        r    = a1 + l5 c2 + l4 s2 + l6 c23 + l6b s23 + l78 c(beta)
+        z    = d1 + l4 c2 - l5 s2 - l6 s23 + l6b c23 - l78 s(beta)
+        p    = (x_pan + r cos az - e sin az,  y_pan + r sin az + e cos az,  z)   # on the roll axis
+        R    = Rz(az) Ry(beta) Rx(-q5) C                                        # C = R_tcp(0)
+        p_tcp = p + R d_tool                                                     # d_tool ~ (7.9, -0.2, 0) mm
+
+    The approach (TCP z) axis is (c(beta) cos az, c(beta) sin az, -s(beta)), so the
+    approach pitch of :func:`so101_tpgmm.kinematics.ik.approach_pitch` is 90 deg - beta.
+    """
+    q1, q2, q3, q4, q5 = np.asarray(q, dtype=np.float64)[:5]
+    az = -q1
+    c2, s2 = np.cos(q2), np.sin(q2)
+    c23, s23 = np.cos(q2 + q3), np.sin(q2 + q3)
+    beta = q2 + q3 + q4
+    cb, sb = np.cos(beta), np.sin(beta)
+    r = g.a1 + g.l5 * c2 + g.l4 * s2 + g.l6 * c23 + g.l6b * s23 + g.l78 * cb
+    z = g.d1 + g.l4 * c2 - g.l5 * s2 - g.l6 * s23 + g.l6b * c23 - g.l78 * sb
+    ca, sa = np.cos(az), np.sin(az)
+    p = np.array([g.pan_xy[0] + r * ca - g.lateral * sa, g.pan_xy[1] + r * sa + g.lateral * ca, z])
+    R = _rz(az) @ _ry(beta) @ _rx(-q5) @ g.tool_rotation
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = p + R @ g.tcp_offset
+    return T
