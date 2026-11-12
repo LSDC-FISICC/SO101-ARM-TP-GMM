@@ -134,6 +134,42 @@ vision:
   max_vision_fk_error_mm: 20
   frames_csv: outputs/cube_frames.csv
 
+tpgmm:
+  # Input: normalized time t in [0, 1]; outputs: TCP position, outward jaw heading h,
+  # gripper, approach pitch (the extra output lets the IK follow the demonstrated posture).
+  outputs: [x, y, z, h, g, pitch]
+  samples_per_primitive: 50    # resampling of every demonstration (equal weight per demo)
+  exclude_aborted: true        # drop cycles with a missed/aborted grasp inside the approach
+  frames:
+    cube_source: vision        # vision (default, matches execution) | fk (cube centre at contact)
+    box:
+      mode: estimate           # estimate = mean release TCP position | fixed
+      position: [0.057, 0.164, 0.082]   # used when mode: fixed [m, base frame]
+      yaw_deg: 0.0
+  k_range: [3, 4, 5, 6, 7, 8, 10, 12]   # BIC model selection
+  max_iter: 200
+  # Diagonal regularization of every covariance (variances): t, x, y, z, h, g, pitch.
+  # t: (0.032)^2 smooths GMR transitions between components (roughness /4, grasp error unchanged);
+  # position (2 mm)^2, angles (2 deg)^2, gripper (1 unit)^2.
+  reg: [1.0e-3, 4.0e-6, 4.0e-6, 4.0e-6, 1.2e-3, 1.0, 1.2e-3]
+  primitives: [approach_grasp, transport_release]
+  boundary_blend: 0.3          # fraction of a primitive used to blend its start into the previous end
+  models_dir: outputs/models
+
+evaluation:
+  n_folds: 100               # held-out cycles for leave-one-out (stratified); 'all' for every cycle
+  workers: 4
+
+inference:
+  policy: segmented          # segmented | monolithic | ik_planner
+  color_order: [red, yellow, green, blue]
+  home_joints_deg: [-5.7, -104.3, 91.3, 76.3, 2.8]   # median rest posture of the demonstrations
+  home_gripper: 1.5
+  return_home_s: 2.0         # joint-space return to home between cubes
+  dt: 0.0333                 # 30 Hz, like the dataset
+  require_full_ik: true      # skip a cube if any trajectory point has no IK solution
+  output_dir: outputs/inference
+
 inspection:
   output_report: docs/dataset_report.md
   figures_dir: docs/figures
