@@ -1,0 +1,43 @@
+# Default configuration for the SO-101 TP-GMM pipeline.
+# Paths are relative to the repository root unless absolute.
+
+dataset:
+  repo_id: SebRivGar/dataset3
+  revision: main
+  local_dir: data/raw/dataset3
+  state_key: observation.state        # follower joints (the leader `action` is NOT used)
+  fixed_camera_key: observation.images.top
+  wrist_camera_key: observation.images.wrist   # not used in this phase
+  # Which video keys to download. The wrist camera is skipped to save ~0.8 GB.
+  download_video_keys: [observation.images.top]
+
+units:
+  # "auto" infers the joint units from the quantization pattern and value ranges
+  # (see so101_tpgmm/data/units.py). Set "degrees" or "range_m100_100" to force,
+  # in which case the detector still runs and an inconsistency raises an error.
+  joints: auto
+  # Max absolute deviation (in motor ticks) tolerated by the quantization test.
+  quantization_tol_ticks: 0.01
+
+kinematics:
+  urdf: so101_tpgmm/kinematics/urdf/so101_new_calib.urdf
+  base_link: base_link
+  tcp_link: gripper_frame_link
+  joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]
+
+gripper:
+  # Gripper values are in LeRobot RANGE_0_100 (0 = calibrated min = closed).
+  # Three regimes were observed in Phase 0 (docs/dataset_report.md):
+  #   closed-empty ~0-12, holding a cube ~17-23 (jaws stop on the cube), open >= ~25.
+  open_threshold: 25.5      # rising above this => OPEN (some approaches open only to ~27)
+  close_threshold: 23.5     # falling below this => CLOSED (hold plateau p99 = 22.2)
+  hold_min: 13.0            # a closed plateau in [hold_min, close_threshold] = holding a cube
+  min_hold_s: 0.4           # minimum duration of a holding plateau
+  min_open_s: 0.15          # minimum duration of an OPEN interval (debounce)
+  smooth_window: 5          # median filter window (frames, odd)
+  plateau_tol: 1.5          # |g - plateau| tolerance used to place contact/release instants
+
+inspection:
+  output_report: docs/dataset_report.md
+  figures_dir: docs/figures
+  n_video_check_episodes: 8   # episodes whose first/last frame is decoded and checked

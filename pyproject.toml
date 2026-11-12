@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "so101_tpgmm"
+version = "0.1.0"
+description = "Learning from Demonstration with Task-Parameterized GMMs for the SO-101 arm (LeRobot)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "pyarrow>=14",
+    "pyyaml>=6.0",
+    "matplotlib>=3.7",
+    "opencv-python-headless>=4.8",
+    "av>=12.0",            # PyAV wheels ship FFmpeg with libdav1d (AV1 decoder)
+    "huggingface_hub>=0.20",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+robot = ["lerobot"]       # only needed on the machine connected to the SO-101
+
+[tool.setuptools.packages.find]
+include = ["so101_tpgmm*"]
+
+[tool.setuptools.package-data]
+"so101_tpgmm.kinematics" = ["urdf/*.urdf"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
