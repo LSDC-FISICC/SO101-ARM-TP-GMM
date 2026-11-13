@@ -11,7 +11,8 @@
 # LOGGER = wandb (default: Weights & Biases through scripts/act/lerobot_train_wandb.py; run `wandb login`
 # once, optionally export WANDB_ENTITY) or trackio (LeRobot's own logger), PROJECT (default so101-act),
 # AUG (true), AUG_BACKEND (gpu; dataloader = LeRobot's default, which crashes on the Spark's ARM CPU),
-# AUG_COMPILE (false: torch.compile of the GPU augmentation), LOG_FREQ (20: log every N steps).
+# AUG_COMPILE (false: torch.compile of the GPU augmentation), LOG_FREQ (20: log every N steps),
+# PRECISION (bf16 mixed precision; "no" = fp32). A and B must use the same precision to be comparable.
 set -euo pipefail
 VARIANT=${1:?usage: train_act_spark.sh A|B}
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -24,6 +25,7 @@ AUG=${AUG:-true}                 # image augmentation on/off
 AUG_BACKEND=${AUG_BACKEND:-gpu}  # gpu | dataloader
 AUG_COMPILE=${AUG_COMPILE:-false}
 LOG_FREQ=${LOG_FREQ:-20}         # console + W&B every N steps (LeRobot's default is 200)
+PRECISION=${PRECISION:-bf16}     # bf16 | no (fp32: 1.86 s/step on the Spark, model update 1.59 s of it)
 PROJECT=${PROJECT:-so101-act}
 EPISODES=$(python -c "import json; print(json.dumps(json.load(open('$ROOT/configs/act_split.json'))['train']).replace(' ', ''))")
 
@@ -45,6 +47,7 @@ COMMON=(
   --num_workers="$WORKERS"
   --save_freq=10000
   --log_freq="$LOG_FREQ"
+  --accelerator.mixed_precision="$PRECISION"
   --seed=1000
   --trackio.enable=true
   --trackio.project="$PROJECT"
