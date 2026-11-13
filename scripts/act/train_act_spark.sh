@@ -11,7 +11,7 @@
 # LOGGER = wandb (default: Weights & Biases through scripts/act/lerobot_train_wandb.py; run `wandb login`
 # once, optionally export WANDB_ENTITY) or trackio (LeRobot's own logger), PROJECT (default so101-act),
 # AUG (true), AUG_BACKEND (gpu; dataloader = LeRobot's default, which crashes on the Spark's ARM CPU),
-# AUG_COMPILE (false: torch.compile of the GPU augmentation).
+# AUG_COMPILE (false: torch.compile of the GPU augmentation), LOG_FREQ (20: log every N steps).
 set -euo pipefail
 VARIANT=${1:?usage: train_act_spark.sh A|B}
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -23,6 +23,7 @@ LOGGER=${LOGGER:-wandb}
 AUG=${AUG:-true}                 # image augmentation on/off
 AUG_BACKEND=${AUG_BACKEND:-gpu}  # gpu | dataloader
 AUG_COMPILE=${AUG_COMPILE:-false}
+LOG_FREQ=${LOG_FREQ:-20}         # console + W&B every N steps (LeRobot's default is 200)
 PROJECT=${PROJECT:-so101-act}
 EPISODES=$(python -c "import json; print(json.dumps(json.load(open('$ROOT/configs/act_split.json'))['train']).replace(' ', ''))")
 
@@ -43,6 +44,7 @@ COMMON=(
   --steps="$STEPS"
   --num_workers="$WORKERS"
   --save_freq=10000
+  --log_freq="$LOG_FREQ"
   --seed=1000
   --trackio.enable=true
   --trackio.project="$PROJECT"

@@ -49,6 +49,14 @@ def _make_shim() -> types.ModuleType:
         run = wandb.init(project=project, name=name, id=name, group=group, config=config,
                          resume={"never": None, "allow": "allow", "must": "must"}.get(resume, "allow"),
                          job_type="train", save_code=False)
+        mode = getattr(getattr(run, "settings", None), "mode", None) or os.environ.get("WANDB_MODE", "online")
+        bar = "=" * 72
+        if run is not None and run.url:
+            print(f"\n{bar}\nW&B run: {run.url}\n(metrics every --log_freq steps: loss, l1_loss, kld_loss, lr, grad norm)\n{bar}\n",
+                  flush=True)
+        else:
+            print(f"\n{bar}\nW&B is in '{mode}' mode: nothing is sent to wandb.ai. Run `wandb login` and unset "
+                  f"WANDB_MODE (or `wandb online`).\n{bar}\n", flush=True)
         return _Run(run)
 
     def log(data, step=None):
