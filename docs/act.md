@@ -45,6 +45,10 @@ augmentation on, same seed; only the learning-rate schedule differs.
 - **Environment:** LeRobot 0.7.0 in a Python environment whose PyTorch sees the Spark's GPU; check `python -c "import torch; print(torch.cuda.is_available())"`
   after installing (pip may replace a CUDA build by a CPU one). Videos are AV1: `pyav` decodes them
   with dav1d; if data loading is the bottleneck (GPU utilization low), raise `WORKERS`.
+- **Image augmentation runs on the GPU** (`AUG_BACKEND=gpu`, not compiled): with LeRobot's default
+  (DataLoader workers, CPU), the sharpness filter's `conv2d` crashes on the Spark's ARM CPU inside
+  oneDNN's JIT (`RuntimeError: label is too far`, `bad err=3 in Xbyak::Error`). If the GPU augmentation
+  fails too, `AUG=false` trains without it (and `AUG_COMPILE=true` tries `torch.compile`, ~3× faster).
 
 ## Offline evaluation (here, CPU is enough)
 

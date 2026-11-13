@@ -9,7 +9,9 @@
 # augmentation, seed), so the offline evaluation isolates its effect. Environment: HF_USER (Hub user
 # for the pushed policy), STEPS (default 100000), BATCH (default 32), WORKERS (default 12),
 # LOGGER = wandb (default: Weights & Biases through scripts/act/lerobot_train_wandb.py; run `wandb login`
-# once, optionally export WANDB_ENTITY) or trackio (LeRobot's own logger), PROJECT (default so101-act).
+# once, optionally export WANDB_ENTITY) or trackio (LeRobot's own logger), PROJECT (default so101-act),
+# AUG (true), AUG_BACKEND (gpu; dataloader = LeRobot's default, which crashes on the Spark's ARM CPU),
+# AUG_COMPILE (false: torch.compile of the GPU augmentation).
 set -euo pipefail
 VARIANT=${1:?usage: train_act_spark.sh A|B}
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -18,6 +20,9 @@ BATCH=${BATCH:-32}
 WORKERS=${WORKERS:-12}
 HF_USER=${HF_USER:?set HF_USER to your Hugging Face user}
 LOGGER=${LOGGER:-wandb}
+AUG=${AUG:-true}                 # image augmentation on/off
+AUG_BACKEND=${AUG_BACKEND:-gpu}  # gpu | dataloader
+AUG_COMPILE=${AUG_COMPILE:-false}
 PROJECT=${PROJECT:-so101-act}
 EPISODES=$(python -c "import json; print(json.dumps(json.load(open('$ROOT/configs/act_split.json'))['train']).replace(' ', ''))")
 
@@ -25,7 +30,11 @@ COMMON=(
   --dataset.repo_id=SebRivGar/dataset3
   --dataset.episodes="$EPISODES"
   --dataset.video_backend=pyav            # AV1 via PyAV/dav1d; torchcodec wheels may be missing on ARM64
-  --dataset.image_transforms.enable=true  # colour/affine jitter: robustness to lighting on the real robot
+  --dataset.image_transforms.enable="$AUG"  # colour/affine jitter: robustness to lighting on the real robot
+  # Augment on the GPU: on the Spark's ARM CPU, oneDNN's JIT fails in the sharpness filter's conv2d
+  # ("label is too far" / "Xbyak::Error") when the DataLoader workers augment. Not compiled (AUG_COMPILE).
+  --dataset.image_transforms.backend="$AUG_BACKEND"
+  --dataset.image_transforms.gpu_compile="$AUG_COMPILE"
   --policy.type=act
   --policy.device=cuda
   --policy.chunk_size=100
