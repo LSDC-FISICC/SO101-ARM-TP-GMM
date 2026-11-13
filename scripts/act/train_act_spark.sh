@@ -7,7 +7,7 @@
 #
 # Both variants are identical except for the learning-rate schedule (same split, batch, steps, image
 # augmentation, seed), so the offline evaluation isolates its effect. Environment: HF_USER (Hub user
-# for the pushed policy), STEPS (default 100000), BATCH (default 32), WORKERS (default 12),
+# for the pushed policy: the one whose token `hf auth login` stored), PUSH (true), STEPS (default 100000), BATCH (default 32), WORKERS (default 12),
 # LOGGER = wandb (default: Weights & Biases through scripts/act/lerobot_train_wandb.py; run `wandb login`
 # once, optionally export WANDB_ENTITY) or trackio (LeRobot's own logger), PROJECT (default so101-act),
 # AUG (true), AUG_BACKEND (gpu; dataloader = LeRobot's default, which crashes on the Spark's ARM CPU),
@@ -19,7 +19,12 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 STEPS=${STEPS:-100000}
 BATCH=${BATCH:-32}
 WORKERS=${WORKERS:-12}
-HF_USER=${HF_USER:?set HF_USER to your Hugging Face user}
+PUSH=${PUSH:-true}               # push the trained policy to the Hub (HF_USER/<name>); false = keep it local only
+if [ "$PUSH" = true ]; then
+  HF_USER=${HF_USER:?set HF_USER to the Hugging Face user whose token is logged in (or PUSH=false)}
+else
+  HF_USER=${HF_USER:-local}
+fi
 LOGGER=${LOGGER:-wandb}
 AUG=${AUG:-true}                 # image augmentation on/off
 AUG_BACKEND=${AUG_BACKEND:-gpu}  # gpu | dataloader
@@ -51,7 +56,7 @@ COMMON=(
   --seed=1000
   --trackio.enable=true
   --trackio.project="$PROJECT"
-  --policy.push_to_hub=true
+  --policy.push_to_hub="$PUSH"
 )
 
 case "$VARIANT" in
