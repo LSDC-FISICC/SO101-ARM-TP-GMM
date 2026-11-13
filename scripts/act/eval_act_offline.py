@@ -60,7 +60,10 @@ def main() -> None:
     ap.add_argument("--name", default=None, help="label for the outputs (default: last part of --policy)")
     ap.add_argument("--stride", type=int, default=15, help="evaluate every N frames")
     ap.add_argument("--episodes", type=int, nargs="*", default=None, help="default: the held-out split")
-    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--device", default="cpu", help="cpu or cuda")
+    ap.add_argument("--dataset-root", default=None,
+                    help="local dataset3 with both cameras (default: dataset.local_dir; on the training machine: "
+                         "~/.cache/huggingface/lerobot/SebRivGar/dataset3)")
     args = ap.parse_args()
 
     import torch
@@ -71,11 +74,14 @@ def main() -> None:
     split = json.loads(resolve_path("configs/act_split.json").read_text())
     episodes = args.episodes or split["test"]
     kin = SO101Kinematics(resolve_path(cfg["kinematics"]["urdf"]))
-    seg = pd.read_csv(resolve_path(cfg["segmentation"]["output_csv"])).set_index("episode")
+    seg_csv = resolve_path(cfg["segmentation"]["output_csv"])
+    if not seg_csv.exists():  # outputs/ is not versioned; docs/ holds the same table
+        seg_csv = resolve_path("docs/segmentation_cycles.csv")
+    seg = pd.read_csv(seg_csv).set_index("episode")
     policy, pre, post, pcfg = load_act(args.policy, args.device)
     chunk = int(pcfg.chunk_size)
-    ds = LeRobotDataset(cfg["dataset"]["repo_id"], root=resolve_path(cfg["dataset"]["local_dir"]), episodes=episodes,
-                        video_backend="pyav")
+    root = Path(args.dataset_root).expanduser() if args.dataset_root else resolve_path(cfg["dataset"]["local_dir"])
+    ds = LeRobotDataset(cfg["dataset"]["repo_id"], root=root, episodes=episodes, video_backend="pyav")
     ep_index = np.asarray(ds.hf_dataset["episode_index"])
     act_all = np.asarray(ds.hf_dataset["action"], dtype=float)
     st_all = np.asarray(ds.hf_dataset["observation.state"], dtype=float)
