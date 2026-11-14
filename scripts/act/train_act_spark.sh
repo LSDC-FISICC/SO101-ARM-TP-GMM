@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Outputs: <this repository>/outputs/train/<name> (whatever the current directory).
 # Train ACT (LeRobot) on dataset3 without the 40 held-out episodes of configs/act_split.json, so that
 # scripts/act/eval_act_offline.py can score it on episodes it has never seen.
 #
@@ -88,4 +89,4 @@ case "$LOGGER" in
 esac
 
 "${TRAIN[@]}" "${COMMON[@]}" "${EXTRA[@]}" \
-  --output_dir="outputs/train/$NAME" --job_name="$NAME" --policy.repo_id="$HF_USER/$NAME"
+  --output_dir="$ROOT/outputs/train/$NAME" --job_name="$NAME" --policy.repo_id="$HF_USER/$NAME"
