@@ -1,5 +1,7 @@
 # ACT on dataset3
 
+Results of the A/B comparison (offline, 40 held-out episodes): `act_report.html`.
+
 ACT (Action Chunking with Transformers, LeRobot implementation) learns joint-space action chunks
 from both cameras (`wrist`, `top`) and the joint state. It is trained outside this repository with
 `lerobot-train` (on the DGX Spark) and evaluated here against the TP-GMM.

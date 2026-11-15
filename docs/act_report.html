@@ -1,0 +1,249 @@
+<title>ACT en dataset3: A vs B</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: one reading column (~70ch) of a lab report; tables and charts may run wider inside their own scroll boxes. */
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --fg: #1b2230; --muted: #5b6577; --rule: #d9dde5;
+  --a: #d9771f;      /* variant A: constant lr */
+  --b: #2463c7;      /* variant B: warm-up + cosine */
+  --base: #8d96a6;   /* zero-motion reference */
+  --good: #1f8a52; --tint: #eef3fb;
+  --display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161d; --surface: #1a2029; --fg: #e4e8ef; --muted: #9aa4b5; --rule: #2d3542;
+  --a: #f0953f; --b: #6f9ef0; --base: #7c869a; --good: #4cc185; --tint: #1c2636; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161d; --surface: #1a2029; --fg: #e4e8ef; --muted: #9aa4b5; --rule: #2d3542;
+  --a: #f0953f; --b: #6f9ef0; --base: #7c869a; --good: #4cc185; --tint: #1c2636; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body); }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 40px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 28px; }
+header { display: flex; flex-direction: column; gap: 8px }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+h1 { font: 600 clamp(28px, 4vw, 38px)/1.15 var(--display); margin: 0; text-wrap: balance }
+h2 { font: 600 21px/1.25 var(--display); margin: 0 0 10px; text-wrap: balance }
+h3 { font: 600 15px/1.3 var(--body); margin: 14px 0 6px }
+p, li { max-width: 70ch; margin: 0 }
+section { display: flex; flex-direction: column; gap: 10px }
+ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px }
+.lede { color: var(--muted); font-size: 16px }
+.verdict { background: var(--tint); border-left: 3px solid var(--b); padding: 16px 18px; border-radius: 0 6px 6px 0;
+  display: flex; flex-direction: column; gap: 8px }
+.verdict strong { color: var(--fg) }
+.key { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted) }
+.sw { width: 12px; height: 12px; border-radius: 2px; display: inline-block }
+.legend { display: flex; flex-wrap: wrap; gap: 16px }
+.scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface) }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; min-width: 560px }
+th, td { padding: 7px 12px; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap }
+th:first-child, td:first-child { text-align: left }
+thead th { font: 500 12px/1.3 var(--body); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; background: var(--bg) }
+tbody tr:last-child td { border-bottom: 0 }
+td.win { color: var(--good); font-weight: 600 }
+td.dim { color: var(--muted) }
+code { font: 13px var(--mono); background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 5px }
+pre { font: 13px/1.5 var(--mono); background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 0 }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px }
+figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0 }
+figcaption { font-size: 13px; color: var(--muted) }
+svg text { fill: var(--muted); font: 11px var(--body) }
+svg .val { fill: var(--fg); font: 500 11px var(--mono) }
+.grid line { stroke: var(--rule) }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px }
+dt { color: var(--muted) }
+dd { margin: 0; min-width: 0 }
+.small { font-size: 13px; color: var(--muted) }
+</style>
+
+<div class="wrap">
+<header>
+  <span class="eyebrow">SO-101 · dataset3 · evaluación offline</span>
+  <h1>ACT en dataset3: comparación de los modelos A y B</h1>
+  <p class="lede">Dos entrenamientos de ACT (LeRobot 0.7.0) iguales salvo el planificador de la tasa de aprendizaje, evaluados en 40 episodios que ninguno vio.</p>
+</header>
+
+<div class="verdict">
+  <p><strong>Recomendación: B (<code>act_dataset3_cosine</code>, warm-up + decaimiento coseno) para las pruebas en el robot.</strong></p>
+  <p>A y B predicen la trayectoria prácticamente igual. B anticipa mejor dónde estará la pinza en el instante del agarre: 19,6 frente a 24,5 mm un segundo antes, mejor en el 70 % de los episodios (p = 0,006). Es una evaluación sobre demostraciones grabadas; el resultado que decide es el del robot.</p>
+</div>
+
+<section>
+  <h2>Qué se comparó</h2>
+  <dl>
+    <dt>Datos</dt><dd>dataset3: 400 episodios, 239 036 cuadros a 30 Hz, cámaras <code>wrist</code> y <code>top</code> a 640×480. Tarea: «Grasp cube and put it in the box».</dd>
+    <dt>Partición</dt><dd>360 episodios de entrenamiento y 40 reservados (uno de cada 9 episodios utilizables, repartidos en toda la grabación): <code>configs/act_split.json</code>.</dd>
+    <dt>Modelo</dt><dd>ACT, ResNet-18 preentrenada en ImageNet, bloques de 100 acciones (3,3 s), 52 M de parámetros.</dd>
+    <dt>Común a A y B</dt><dd>Lotes de 32, 50 000 pasos (~1,6 M muestras, ~7,4 pasadas por los datos), aumentación de imágenes en GPU, precisión mixta bf16, AdamW (decaimiento 1e-4, recorte del gradiente 10), semilla 1000.</dd>
+    <dt>A</dt><dd>Preset de ACT: tasa constante 1e-5 (también el backbone).</dd>
+    <dt>B</dt><dd>Warm-up lineal de 2000 pasos hasta 3e-5 y decaimiento coseno hasta 3e-6; el backbone sigue la misma forma de 1e-5 a 1e-6.</dd>
+    <dt>Hardware</dt><dd>DGX Spark (GB10): ~1,5 s por paso, ~21 muestras/s, ~21 h por variante, 12,1 GB de memoria.</dd>
+  </dl>
+</section>
+
+<section>
+  <h2>Entrenamiento</h2>
+  <ul>
+    <li>El error de las acciones (<code>l1_loss</code>, en desviaciones estándar) bajó de 0,74 a ~0,13 en A. <strong>B quedó por debajo de A en todo el entrenamiento</strong> (~0,11 frente a ~0,14 hacia los 35 000 pasos).</li>
+    <li>El término variacional (<code>kld_loss</code>) cayó a casi cero hacia el paso 3000 en ambas: el modelo dejó de usar la variable latente y la política es prácticamente determinista. Es habitual en ACT con peso KL de 10 y no afecta la ejecución, donde ese latente se fija en cero.</li>
+    <li>Norma del gradiente estable (~8) en las dos, sin picos.</li>
+  </ul>
+  <p class="small">La pérdida más baja de B en entrenamiento no se tradujo en mejores trayectorias en los episodios reservados (siguiente sección): la evaluación sobre episodios no vistos es la que cuenta.</p>
+</section>
+
+<section>
+  <h2>Cómo se evaluó</h2>
+  <ul>
+    <li><strong>Predicción con la observación real:</strong> en cada episodio reservado, cada 15 cuadros, ACT recibe las imágenes y el estado registrados y predice su bloque de acciones. Se compara con lo que comandó el operador después: error articular y error del TCP (por cinemática directa) a 0,03, 0,33, 1 y 2 s.</li>
+    <li><strong>Referencia «sin movimiento»:</strong> repetir la posición actual. Es lo que lograría una política que no aprendió nada.</li>
+    <li><strong>Anticipación del agarre:</strong> desde 1 s y 2 s antes del contacto demostrado, dónde predice ACT que estará la pinza en ese instante. Se mide contra la posición medida del brazo seguidor y, en «espacio de comandos», contra el comando del líder. En el contacto, el seguidor queda 8,5 mm por detrás del líder (mediana; 3,6 mm en el resto del movimiento) porque el cubo frena la pinza y el brazo carga peso.</li>
+    <li><strong>Comparación pareada:</strong> mismos episodios y cuadros para A y B; prueba de rangos con signo de Wilcoxon.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Resultados</h2>
+  <div class="legend" aria-hidden="true">
+    <span class="key"><span class="sw" style="background:var(--a)"></span>A · tasa constante</span>
+    <span class="key"><span class="sw" style="background:var(--b)"></span>B · warm-up + coseno</span>
+    <span class="key"><span class="sw" style="background:var(--base)"></span>Sin movimiento</span>
+  </div>
+  <div class="charts">
+    <figure>
+      <svg id="c1" viewBox="0 0 340 220" role="img" aria-label="Error del TCP según el horizonte de predicción para A, B y la referencia sin movimiento"></svg>
+      <figcaption>Error del TCP (mediana, mm) según cuánto hacia adelante se predice. A y B son casi idénticos; a 2 s ambos se equivocan ~15 mm frente a 56 mm de la referencia.</figcaption>
+    </figure>
+    <figure>
+      <svg id="c2" viewBox="0 0 340 220" role="img" aria-label="Anticipación del agarre en espacio de comandos para A, B y la referencia sin movimiento"></svg>
+      <figcaption>Anticipación del agarre en espacio de comandos (mediana, mm). B mejora 3–5 mm. A 1 s del contacto ninguno supera a quedarse quieto (15,0 mm).</figcaption>
+    </figure>
+  </div>
+
+  <h3>Predicción de la trayectoria (mediana, 40 episodios)</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Horizonte</th><th>Articular A [°]</th><th>Articular B [°]</th><th>Sin mov. [°]</th><th>TCP A [mm]</th><th>TCP B [mm]</th><th>Sin mov. [mm]</th><th>Pinza A</th><th>Pinza B</th></tr></thead>
+    <tbody>
+      <tr><td>0,03 s</td><td>1,00</td><td>0,96</td><td class="dim">0,62</td><td>4,8</td><td>4,8</td><td class="dim">4,6</td><td>0,3</td><td>0,3</td></tr>
+      <tr><td>0,33 s</td><td>1,39</td><td>1,49</td><td class="dim">0,87</td><td>6,8</td><td>6,8</td><td class="dim">8,2</td><td>0,3</td><td>0,3</td></tr>
+      <tr><td>1 s</td><td>2,60</td><td>2,80</td><td class="dim">2,76</td><td>12,6</td><td>12,9</td><td class="dim">17,1</td><td>0,4</td><td>0,4</td></tr>
+      <tr><td>2 s</td><td>3,63</td><td>3,67</td><td class="dim">10,88</td><td>14,8</td><td>14,8</td><td class="dim">55,9</td><td>0,8</td><td>0,7</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Anticipación del agarre (mediana, 40 episodios)</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Medida</th><th>Antelación</th><th>A [mm]</th><th>B [mm]</th><th>Sin mov. [mm]</th><th>B mejor en</th><th>p</th></tr></thead>
+    <tbody>
+      <tr><td>Contra el seguidor</td><td>1 s</td><td>21,3</td><td class="win">17,5</td><td class="dim">18,1</td><td>65 %</td><td>0,0098</td></tr>
+      <tr><td>Contra el seguidor</td><td>2 s</td><td>23,0</td><td class="win">20,7</td><td class="dim">49,3</td><td>60 %</td><td>0,062</td></tr>
+      <tr><td>Espacio de comandos</td><td>1 s</td><td>24,5</td><td class="win">19,6</td><td class="dim">15,0</td><td>70 %</td><td>0,0064</td></tr>
+      <tr><td>Espacio de comandos</td><td>2 s</td><td>24,9</td><td class="win">22,1</td><td class="dim">45,8</td><td>60 %</td><td>0,027</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Comparación pareada de la trayectoria</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Medida</th><th>Horizonte</th><th>Mediana A</th><th>Mediana B</th><th>B mejor en</th><th>p</th><th>Pares</th></tr></thead>
+    <tbody>
+      <tr><td>TCP [mm]</td><td>0,03 s</td><td>4,81</td><td>4,81</td><td>56 %</td><td>2,6e-07</td><td>1670</td></tr>
+      <tr><td>TCP [mm]</td><td>0,33 s</td><td>6,80</td><td>6,78</td><td>52 %</td><td>0,0091</td><td>1670</td></tr>
+      <tr><td>TCP [mm]</td><td>1 s</td><td>12,59</td><td>12,90</td><td>49 %</td><td>0,31</td><td>1590</td></tr>
+      <tr><td>TCP [mm]</td><td>2 s</td><td>14,82</td><td>14,75</td><td>50 %</td><td>0,30</td><td>1510</td></tr>
+      <tr><td>Articular [°]</td><td>0,03 s</td><td>1,00</td><td>0,96</td><td>55 %</td><td>1,2e-07</td><td>1670</td></tr>
+      <tr><td>Articular [°]</td><td>0,33 s</td><td>1,39</td><td>1,49</td><td>50 %</td><td>0,60</td><td>1670</td></tr>
+      <tr><td>Articular [°]</td><td>1 s</td><td>2,60</td><td>2,80</td><td>48 %</td><td>0,0082</td><td>1590</td></tr>
+      <tr><td>Articular [°]</td><td>2 s</td><td>3,63</td><td>3,67</td><td>52 %</td><td>0,20</td><td>1510</td></tr>
+      <tr><td>Pinza</td><td>0,03 s</td><td>0,32</td><td>0,31</td><td>55 %</td><td>1,6e-06</td><td>1670</td></tr>
+      <tr><td>Pinza</td><td>0,33 s</td><td>0,32</td><td>0,29</td><td>54 %</td><td>0,00013</td><td>1670</td></tr>
+      <tr><td>Pinza</td><td>1 s</td><td>0,36</td><td>0,37</td><td>51 %</td><td>0,60</td><td>1590</td></tr>
+      <tr><td>Pinza</td><td>2 s</td><td>0,83</td><td>0,74</td><td>54 %</td><td>0,014</td><td>1510</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">Con ~1600 pares, diferencias de 0,04° o 0,02 mm salen estadísticamente significativas sin tener importancia práctica, y van en ambas direcciones.</p>
+</section>
+
+<section>
+  <h2>Lectura</h2>
+  <ul>
+    <li><strong>Ambos modelos aprendieron el movimiento.</strong> A 2 s se equivocan ~15 mm frente a 56 mm sin moverse (3,8 veces menos). A horizontes muy cortos la referencia empata o gana porque en la mayoría de los cuadros el brazo casi no se mueve.</li>
+    <li><strong>A y B predicen la trayectoria igual.</strong> Las diferencias son de décimas de milímetro o de grado.</li>
+    <li><strong>B anticipa mejor el agarre</strong>, en 3–5 mm según la medida, de forma consistente en las cuatro mediciones y significativa en tres.</li>
+    <li><strong>Un segundo antes del contacto, ninguno supera a quedarse quieto en espacio de comandos</strong> (B 19,6 mm, A 24,5 mm, referencia 15,0 mm), mientras que dos segundos antes ambos la superan con holgura. Que el error casi no cambie con la antelación sugiere un desfase temporal, más que espacial: ACT llegaría al lugar correcto un poco antes o después que el operador. Queda una medida sin tiempo para confirmarlo (más abajo).</li>
+    <li><strong>La política anterior</strong> (<code>SebRivGar/train_act_policy2</code>, entrenada en otro dataset con 20 episodios) tiene en dataset3 errores de 70–90 mm, peor que no moverse. No es una política para esta tarea.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Límites</h2>
+  <ul>
+    <li><strong>Sin lazo cerrado:</strong> ACT siempre recibe la observación real del episodio. No se mide si se acumulan errores al ejecutarse sola ni si logra el agarre.</li>
+    <li><strong>Una corrida por variante:</strong> la significancia es entre episodios, no entre entrenamientos. Parte de la diferencia A–B podría deberse a la semilla; separarlo exige repetir cada variante con otras semillas.</li>
+    <li><strong>40 episodios</strong> y un solo tamaño de lote (32); el efecto del lote no se evaluó.</li>
+    <li><strong>No es comparable con el TP-GMM:</strong> su error de agarre (10,7 mm) se predice desde el inicio del movimiento, sin imágenes, con la posición del cubo dada por la visión. La comparación justa es en el robot, con el mismo protocolo.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Siguientes pasos</h2>
+  <ul>
+    <li><strong>Robot:</strong> probar B con <code>lerobot-rollout</code>, la tarea exacta «Grasp cube and put it in the box», las cámaras en su posición de grabación y las mismas posiciones de cubo usadas con el TP-GMM y el SAC residual; registrar si el cubo termina en el recipiente.</li>
+    <li><strong>Dónde frente a cuándo:</strong> volver a correr la evaluación de B con la versión actual del script, que agrega la distancia mínima de la trayectoria predicha al punto de agarre y el instante predicho de cierre de la pinza.</li>
+    <li><strong>Opcional:</strong> repetir A y B con otra semilla, o una variante con lotes de 8, si se quiere afirmar la diferencia con más seguridad.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Reproducción</h2>
+  <pre>bash scripts/act/train_act_spark.sh A          # PUSH=false STEPS=50000 AUG_COMPILE=true
+bash scripts/act/train_act_spark.sh B
+python scripts/act/eval_act_offline.py --policy outputs/train/act_dataset3_cosine/checkpoints/last/pretrained_model \
+  --name B_50k --dataset-root ~/.cache/huggingface/lerobot/SebRivGar/dataset3 --device cuda
+python scripts/act/compare_act_offline.py A_50k B_50k</pre>
+  <p class="small">Repositorio SO101-ARM-TP-GMM, rama <code>claude/stoic-wright-rcmidc</code>; detalles en <code>docs/act.md</code>.</p>
+</section>
+</div>
+
+<script>
+(function () {
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs, parent, text) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    parent.appendChild(e); return e;
+  }
+  function fmt(v) { return (Math.round(v * 10) / 10).toString().replace(".", ","); }
+  // grouped bars: groups (x categories) × series [A, B, base], linear y from 0 to ymax
+  function bars(id, cats, series, ymax, step, unit) {
+    var svg = document.getElementById(id), W = 340, H = 220, L = 40, R = 8, T = 18, B = 34;
+    var pw = W - L - R, ph = H - T - B, y = function (v) { return T + ph - v / ymax * ph; };
+    var g = el("g", { "class": "grid" }, svg);
+    for (var t = 0; t <= ymax + 1e-9; t += step) {
+      el("line", { x1: L, x2: W - R, y1: y(t), y2: y(t) }, g);
+      el("text", { x: L - 6, y: y(t) + 4, "text-anchor": "end" }, svg, t);
+    }
+    el("text", { x: 4, y: 11 }, svg, unit);
+    var gw = pw / cats.length, bw = Math.min(22, (gw - 14) / series.length);
+    cats.forEach(function (c, i) {
+      var x0 = L + i * gw + (gw - bw * series.length - 4 * (series.length - 1)) / 2;
+      series.forEach(function (s, j) {
+        var v = s.v[i], x = x0 + j * (bw + 4), h = y(0) - y(v);
+        el("rect", { x: x, y: y(v), width: bw, height: Math.max(h, 1), rx: 2, fill: "var(" + s.c + ")" }, svg);
+        el("text", { x: x + bw / 2, y: y(v) - 4, "text-anchor": "middle", "class": "val" }, svg, fmt(v));
+      });
+      el("text", { x: L + i * gw + gw / 2, y: H - 12, "text-anchor": "middle" }, svg, c);
+    });
+  }
+  bars("c1", ["0,03 s", "0,33 s", "1 s", "2 s"],
+       [{ v: [4.8, 6.8, 12.6, 14.8], c: "--a" }, { v: [4.8, 6.8, 12.9, 14.8], c: "--b" }, { v: [4.6, 8.2, 17.1, 55.9], c: "--base" }],
+       60, 10, "mm");
+  bars("c2", ["1 s antes", "2 s antes"],
+       [{ v: [24.5, 24.9], c: "--a" }, { v: [19.6, 22.1], c: "--b" }, { v: [15.0, 45.8], c: "--base" }],
+       50, 10, "mm");
+})();
+</script>

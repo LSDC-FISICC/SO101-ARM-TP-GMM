@@ -30,7 +30,7 @@ cinta azul miden 10 × 40 cm por dentro.*
 | 6 | Alternativa estable: LPV-DS (campo de velocidades con estabilidad garantizada) y prueba de perturbaciones → [`docs/lpvds_report.md`](docs/lpvds_report.md), [`docs/perturbation_report.md`](docs/perturbation_report.md), [`docs/ds_field.md`](docs/ds_field.md) | ✅ experimental |
 | 7 | Simulación en MuJoCo con 3 cubos aleatorios y las políticas aprendidas → [`docs/mujoco_sim.md`](docs/mujoco_sim.md) | ✅ |
 | 8 | SAC desde cero y residual sobre el TP-GMM (simulación y robot real) → [`docs/sac_report.md`](docs/sac_report.md) | ✅ residual · desde cero: 0 % a 780 k pasos |
-| 9 | ACT (LeRobot) sobre dataset3: partición con 40 episodios reservados, entrenamiento en la Spark, evaluación offline → [`docs/act.md`](docs/act.md) | ⏳ entrenamiento |
+| 9 | ACT (LeRobot) sobre dataset3: partición con 40 episodios reservados, entrenamiento en la Spark, evaluación offline → [`docs/act.md`](docs/act.md), [`docs/act_report.html`](docs/act_report.html) | ✅ offline (B recomendado) · ⏳ robot |
 
 ## Instalación
 
