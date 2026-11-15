@@ -35,7 +35,8 @@ def main() -> None:
          "| metric | horizon | median A | median B | B better in | Wilcoxon p | pairs |", "|---|---|---|---|---|---|---|"]
     metrics = [("chunk", "tcp_err_mm", "TCP error [mm]"), ("chunk", "joint_err_deg", "joint error [°]"),
                ("chunk", "grip_err", "gripper error"), ("grasp", "tcp_err_mm", "grasp anticipation [mm]"),
-               ("grasp_cmd", "tcp_err_mm", "grasp anticipation, command space [mm]")]
+               ("grasp_cmd", "tcp_err_mm", "grasp anticipation, command space [mm]"),
+               ("grasp_cmd_closest", "tcp_err_mm", "closest approach to the grasp [mm]")]
     for kind, col, label in metrics:
         for h, g in m[m.kind == kind].groupby("horizon"):
             a, b = g[f"{col}_a"], g[f"{col}_b"]

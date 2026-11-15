@@ -132,6 +132,18 @@ def main() -> None:
                     rows.append(dict(policy=name, episode=e, frame=k, horizon=lead, kind="grasp_cmd",
                                      tcp_err_mm=float(np.linalg.norm(tcp(a[lead - 1]) - contact_cmd) * 1e3),
                                      base_tcp_err_mm=float(np.linalg.norm(tcp(act_all[idx[k]]) - contact_cmd) * 1e3)))
+                    # time-free: closest approach of the whole predicted chunk to the contact command (where, not when),
+                    # and when the predicted gripper closes vs the demonstrated contact
+                    path = np.array([tcp(q) for q in a])
+                    d = np.linalg.norm(path - contact_cmd, axis=1)
+                    g = a[:, 5]
+                    i_open = int(np.argmax(g)) if g.max() > 25 else 0
+                    shut = np.flatnonzero(g[i_open:] < 0.5 * (g[i_open] + g[i_open:].min()))
+                    t_close = (i_open + shut[0] + 1 - lead) / 30 if len(shut) and g[i_open] > 25 else np.nan
+                    rows.append(dict(policy=name, episode=e, frame=k, horizon=lead, kind="grasp_cmd_closest",
+                                     tcp_err_mm=float(d.min() * 1e3), base_tcp_err_mm=float(np.linalg.norm(
+                                         tcp(act_all[idx[k]]) - contact_cmd) * 1e3),
+                                     closest_dt_s=float((int(np.argmin(d)) + 1 - lead) / 30), close_dt_s=float(t_close)))
         print(f"episode {e}: {sum(r['episode'] == e for r in rows)} rows", flush=True)
     out = resolve_path("outputs/act") / f"offline_{name}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -145,6 +157,8 @@ def summarize(df: pd.DataFrame, name: str) -> None:
                                                    "base_tcp_err_mm", "grip_err"]].median()
     g = df[df.kind == "grasp"].groupby("horizon")[["tcp_err_mm", "base_tcp_err_mm"]].median()
     gc = df[df.kind == "grasp_cmd"].groupby("horizon")[["tcp_err_mm", "base_tcp_err_mm"]].median()
+    gm = df[df.kind == "grasp_cmd_closest"].groupby("horizon")[["tcp_err_mm", "closest_dt_s", "close_dt_s"]].median() \
+        if "closest_dt_s" in df else pd.DataFrame()
     L = [f"## ACT offline: `{name}` ({df.episode.nunique()} held-out episodes)\n",
          "Median errors vs the recorded operator commands (teacher forcing: recorded observation, predicted chunk):\n",
          "| horizon | joint err ACT [°] | joint err zero-motion [°] | TCP err ACT [mm] | TCP err zero-motion [mm] | gripper err ACT |",
@@ -162,6 +176,13 @@ def summarize(df: pd.DataFrame, name: str) -> None:
               "follower lag at contact from both):\n", "| ahead | ACT [mm] | zero-motion [mm] |", "|---|---|---|"]
         for h, r in gc.iterrows():
             L.append(f"| {h / 30:.0f} s | {r.tcp_err_mm:.1f} | {r.base_tcp_err_mm:.1f} |")
+    if len(gm):
+        L += ["", "Where vs when (command space): closest approach of the whole predicted chunk to the contact command, "
+              "when it happens, and when the predicted gripper closes (both relative to the demonstrated contact; "
+              "negative = early):\n", "| ahead | closest approach [mm] | at [s] | predicted closing at [s] |",
+              "|---|---|---|---|"]
+        for h, r in gm.iterrows():
+            L.append(f"| {h / 30:.0f} s | {r.tcp_err_mm:.1f} | {r.closest_dt_s:+.2f} | {r.close_dt_s:+.2f} |")
     text = "\n".join(L) + "\n"
     out = resolve_path("outputs/act") / f"offline_{name}.md"
     out.write_text(text, encoding="utf-8")
