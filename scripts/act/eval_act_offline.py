@@ -122,10 +122,16 @@ def main() -> None:
                                  base_tcp_err_mm=float(np.linalg.norm(tcp(cur) - tcp(true)) * 1e3)))
             for lead in (30, 60):
                 if close >= 0 and k == close - lead and lead <= chunk:
-                    contact = tcp(st_all[idx[close]])
+                    contact = tcp(st_all[idx[close]])  # follower (measured) TCP at contact
                     rows.append(dict(policy=name, episode=e, frame=k, horizon=lead, kind="grasp",
                                      tcp_err_mm=float(np.linalg.norm(tcp(a[lead - 1]) - contact) * 1e3),
                                      base_tcp_err_mm=float(np.linalg.norm(tcp(st_all[idx[k]]) - contact) * 1e3)))
+                    # command space: predicted vs recorded leader command at contact. At contact the follower lags
+                    # the leader by ~8.5 mm (median, held-out episodes): the cube stops the jaws / the arm sags.
+                    contact_cmd = tcp(act_all[idx[close]])
+                    rows.append(dict(policy=name, episode=e, frame=k, horizon=lead, kind="grasp_cmd",
+                                     tcp_err_mm=float(np.linalg.norm(tcp(a[lead - 1]) - contact_cmd) * 1e3),
+                                     base_tcp_err_mm=float(np.linalg.norm(tcp(act_all[idx[k]]) - contact_cmd) * 1e3)))
         print(f"episode {e}: {sum(r['episode'] == e for r in rows)} rows", flush=True)
     out = resolve_path("outputs/act") / f"offline_{name}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +144,7 @@ def summarize(df: pd.DataFrame, name: str) -> None:
     c = df[df.kind == "chunk"].groupby("horizon")[["joint_err_deg", "base_joint_err_deg", "tcp_err_mm",
                                                    "base_tcp_err_mm", "grip_err"]].median()
     g = df[df.kind == "grasp"].groupby("horizon")[["tcp_err_mm", "base_tcp_err_mm"]].median()
+    gc = df[df.kind == "grasp_cmd"].groupby("horizon")[["tcp_err_mm", "base_tcp_err_mm"]].median()
     L = [f"## ACT offline: `{name}` ({df.episode.nunique()} held-out episodes)\n",
          "Median errors vs the recorded operator commands (teacher forcing: recorded observation, predicted chunk):\n",
          "| horizon | joint err ACT [°] | joint err zero-motion [°] | TCP err ACT [mm] | TCP err zero-motion [mm] | gripper err ACT |",
@@ -149,6 +156,11 @@ def summarize(df: pd.DataFrame, name: str) -> None:
         L += ["", "Grasp anticipation: predicted TCP at the demonstrated contact instant vs the contact TCP:\n",
               "| ahead | ACT [mm] | zero-motion [mm] |", "|---|---|---|"]
         for h, r in g.iterrows():
+            L.append(f"| {h / 30:.0f} s | {r.tcp_err_mm:.1f} | {r.base_tcp_err_mm:.1f} |")
+    if len(gc):
+        L += ["", "Same, in command space (predicted vs recorded leader command at contact; removes the ~8.5 mm "
+              "follower lag at contact from both):\n", "| ahead | ACT [mm] | zero-motion [mm] |", "|---|---|---|"]
+        for h, r in gc.iterrows():
             L.append(f"| {h / 30:.0f} s | {r.tcp_err_mm:.1f} | {r.base_tcp_err_mm:.1f} |")
     text = "\n".join(L) + "\n"
     out = resolve_path("outputs/act") / f"offline_{name}.md"
