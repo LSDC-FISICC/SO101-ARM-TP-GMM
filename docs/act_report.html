@@ -53,7 +53,7 @@ pre { font: 13px/1.5 var(--mono); background: var(--surface); border: 1px solid 
 figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0 }
 figcaption { font-size: 13px; color: var(--muted) }
 svg text { fill: var(--muted); font: 11px var(--body) }
-svg .val { fill: var(--fg); font: 500 11px var(--mono) }
+svg .val { fill: var(--fg); font: 500 9px var(--mono) }
 .grid line { stroke: var(--rule) }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px }
 dt { color: var(--muted) }
@@ -228,13 +228,18 @@ python scripts/act/compare_act_offline.py A_50k B_50k</pre>
       el("text", { x: L - 6, y: y(t) + 4, "text-anchor": "end" }, svg, t);
     }
     el("text", { x: 4, y: 11 }, svg, unit);
-    var gw = pw / cats.length, bw = Math.min(22, (gw - 14) / series.length);
+    var gap = 2, gw = pw / cats.length, bw = Math.min(22, (gw - 10) / series.length - gap);
     cats.forEach(function (c, i) {
-      var x0 = L + i * gw + (gw - bw * series.length - 4 * (series.length - 1)) / 2;
+      var x0 = L + i * gw + (gw - bw * series.length - gap * (series.length - 1)) / 2;
+      var prevLy = null, prevTop = null;
       series.forEach(function (s, j) {
-        var v = s.v[i], x = x0 + j * (bw + 4), h = y(0) - y(v);
+        var v = s.v[i], x = x0 + j * (bw + gap), h = y(0) - y(v);
+        // a label sits 4 px above its bar; when the neighbouring bar has a similar height, step it up so they do not overlap
+        var ly = y(v) - 4;
+        if (prevLy !== null && Math.abs(y(v) - prevTop) < 12) ly = Math.min(ly, prevLy - 10);
+        prevLy = ly; prevTop = y(v);
         el("rect", { x: x, y: y(v), width: bw, height: Math.max(h, 1), rx: 2, fill: "var(" + s.c + ")" }, svg);
-        el("text", { x: x + bw / 2, y: y(v) - 4, "text-anchor": "middle", "class": "val" }, svg, fmt(v));
+        el("text", { x: x + bw / 2, y: ly, "text-anchor": "middle", "class": "val" }, svg, fmt(v));
       });
       el("text", { x: L + i * gw + gw / 2, y: H - 12, "text-anchor": "middle" }, svg, c);
     });
