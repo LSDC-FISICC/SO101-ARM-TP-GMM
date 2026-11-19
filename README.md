@@ -400,6 +400,7 @@ docs/
   tpgmm_report.md             entrenamiento, selección por BIC, componentes (generado)
   evaluation_report.md        comparación leave-one-out de los cuatro modelos (generado)
   mujoco_sim.md               simulación MuJoCo de las políticas (generado)
+  robot_tpgmm.md              pasos para ejecutar el TP-GMM en el SO-101 real
   sac_report.md               SAC desde cero y residual (generado)
   ds_field.md                 campo vectorial / divergencia del GMR-DS (generado)
   lpvds_report.md             modelo LPV-DS (generado)
