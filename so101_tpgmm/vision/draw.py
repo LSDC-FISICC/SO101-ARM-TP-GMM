@@ -45,11 +45,24 @@ def draw_detections(
     return img
 
 
-def draw_plan_overlay(img: np.ndarray, plan, p2b, kin, tcp_offset: np.ndarray | None = None) -> np.ndarray:
+def draw_plan_overlay(img: np.ndarray, plan, p2b, kin, tcp_offset: np.ndarray | None = None,
+                      q_now_deg: np.ndarray | None = None) -> np.ndarray:
     """Planned TCP path of every cube (vertical projection on the table, in the cube's colour: approach
     solid, transport thin) and the grasp: TCP (filled dot) and, with ``tcp_offset``, where the cube
-    centre will be when the jaws close (ring + cross; it should sit on the detected cube)."""
+    centre will be when the jaws close (ring + cross; it should sit on the detected cube).
+
+    The ring only checks the plan against the detection: both go through the same homography, so a moved
+    camera shifts them together. ``q_now_deg`` (the arm's joints when the photo was taken) adds the camera
+    check: the TCP by forward kinematics, projected (magenta diamond). It must sit between the finger tips
+    seen in the photo; if it does not, the camera moved since calibration and every position is off."""
     img = img.copy()
+    if q_now_deg is not None:
+        T = kin.fk(np.deg2rad(np.asarray(q_now_deg, float)[:5]))
+        now = tuple(int(v) for v in p2b.to_pixel(T[None, :2, 3])[0].round())
+        cv2.drawMarker(img, now, (0, 0, 0), cv2.MARKER_DIAMOND, 16, 4, cv2.LINE_AA)
+        cv2.drawMarker(img, now, (255, 0, 255), cv2.MARKER_DIAMOND, 16, 2, cv2.LINE_AA)
+        cv2.putText(img, "TCP now (FK)", (now[0] + 12, now[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 3, cv2.LINE_AA)
+        cv2.putText(img, "TCP now (FK)", (now[0] + 12, now[1] + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1, cv2.LINE_AA)
     for k, cp in enumerate(plan.cubes):
         if cp.status != "planned":
             continue
@@ -80,7 +93,7 @@ def draw_plan_overlay(img: np.ndarray, plan, p2b, kin, tcp_offset: np.ndarray | 
         txt = f"grasp #{cp.order + 1}"
         cv2.putText(img, txt, (tcp_px[0] + 8, tcp_px[1] + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 3, cv2.LINE_AA)
         cv2.putText(img, txt, (tcp_px[0] + 8, tcp_px[1] + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1, cv2.LINE_AA)
-    legend = "path: TCP projected on the table | dot: TCP at grasp | ring: cube centre at grasp"
+    legend = "path: TCP | dot: TCP at grasp | ring: cube at grasp | diamond: TCP now (FK)"
     h = img.shape[0]
     cv2.putText(img, legend, (8, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 3, cv2.LINE_AA)
     cv2.putText(img, legend, (8, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)

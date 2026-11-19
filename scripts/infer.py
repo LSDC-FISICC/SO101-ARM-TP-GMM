@@ -88,7 +88,8 @@ def main() -> None:
         labels.append(f"#{c.order + 1} {d.color} {'OK' if c.status == 'planned' else 'SKIP'}")
     img = draw_detections(rgb, plan.detections, labels or None, header=f"{name}: {policy_name}")
     cv2.imwrite(str(out) + "_detections.jpg", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-    overlay = draw_plan_overlay(img, plan, p2b, ik.kin, tcp_offset)
+    q_now = np.asarray(start if start is not None else icfg["home_joints_deg"], float)  # pose when the photo was taken
+    overlay = draw_plan_overlay(img, plan, p2b, ik.kin, tcp_offset, q_now_deg=q_now)
     overlay_path = str(out) + "_plan.jpg"
     cv2.imwrite(overlay_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
     print(f"{len(plan.cubes)} cube(s) detected:")

@@ -117,11 +117,21 @@ Se abre una ventana con la escena (cualquier tecla la cierra):
 - la detección de cada cubo, con su número de orden y `OK` (planeado) o `SKIP` (omitido);
 - el recorrido planeado del TCP proyectado sobre la mesa, en el color del cubo: trazo grueso hasta el
   agarre y delgado en el transporte;
+- un **rombo magenta** donde está la pinza ahora según la cinemática del robot (FK), proyectado con
+  la calibración de la cámara;
 - en el agarre, un **punto** donde quedará el TCP y un **anillo con cruz** donde quedará el centro del
   cubo según la calibración.
 
-**El anillo debe caer sobre el cubo detectado.** Si cae al lado, el problema es de calibración de la
-cámara, no de la pinza.
+Dos comprobaciones distintas:
+
+- **El rombo magenta debe caer entre las puntas de la pinza que se ve en la foto.** Es la única marca
+  que compara la cinemática del robot con la cámara: si cae lejos, la cámara se movió desde la
+  calibración y todas las posiciones están desplazadas (aunque los anillos caigan sobre los cubos).
+  Supone que el brazo estaba en la pose de reposo al tomar la foto, o la que se pase con
+  `--start-joints`.
+- **El anillo debe caer sobre el centro del cubo detectado.** Comprueba que el plan apunta al cubo. No
+  comprueba la cámara: detección y anillo pasan por la misma homografía, así que una cámara movida los
+  desplaza juntos. Un anillo en el borde del cubo anticipa un agarre por el borde.
 
 La imagen se guarda en `outputs/inference/foto_640_plan.jpg`; la detección sola, en
 `outputs/inference/foto_640_detections.jpg`. Si la ventana no abre, el script intenta con matplotlib o
