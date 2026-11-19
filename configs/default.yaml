@@ -115,6 +115,9 @@ vision:
   open_kernel: 3
   close_kernel: 5
   exclude_boxes: [[440, 0, 640, 115], [250, 400, 410, 480]]   # box (yellow object inside), camera stand
+  # Calibration view (median background of dataset3's first frames): scripts/infer.py aligns the taped
+  # grid of each photo to it and corrects the homography if the camera moved (so101_tpgmm/vision/register.py).
+  reference_image: configs/reference_top.jpg
   intrinsics: null           # optional {K: [[fx,0,cx],[0,fy,cy],[0,0,1]], dist: [k1,k2,p1,p2,k3]}
   scene:
     reference_margin_frames: 2       # reference frame = motion onset - this

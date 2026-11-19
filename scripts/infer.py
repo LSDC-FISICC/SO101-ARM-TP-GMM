@@ -45,6 +45,9 @@ def main() -> None:
     ap.add_argument("--start-joints", type=float, nargs=5, default=None, help="current joints [deg]")
     ap.add_argument("--start-gripper", type=float, default=None)
     ap.add_argument("--name", type=str, default=None)
+    ap.add_argument("--register", choices=["on", "check", "off"], default="on",
+                    help="align the taped grid of the photo to the calibration view (vision.reference_image) and "
+                         "correct the pixel->base homography: on (default) corrects, check only reports, off skips")
     ap.add_argument("--show", action=argparse.BooleanOptionalAction, default=True,
                     help="open a window with the detections and the planned grasps (--no-show: only save it)")
     args = ap.parse_args()
@@ -52,7 +55,16 @@ def main() -> None:
     icfg, vcfg = cfg["inference"], cfg["vision"]
 
     if args.image:
-        rgb = cv2.cvtColor(cv2.imread(args.image), cv2.COLOR_BGR2RGB)
+        bgr = cv2.imread(args.image)
+        if bgr is None:
+            sys.exit(f"cannot read {args.image}")
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        w, h = cfg["camera"]["image_size"]
+        if rgb.shape[:2] != (h, w):
+            print(f"WARNING: {args.image} is {rgb.shape[1]}x{rgb.shape[0]}, the calibration is for {w}x{h}: resized. "
+                  f"Capture at {w}x{h} with scripts/capture_top.py (another capture mode can change the field "
+                  f"of view; --register corrects it only if the taped grid is fully visible).")
+            rgb = cv2.resize(rgb, (w, h), interpolation=cv2.INTER_AREA)
         name = args.name or Path(args.image).stem
         start, gstart = args.start_joints, args.start_gripper
     else:
@@ -74,6 +86,8 @@ def main() -> None:
     H, tcp_offset, plane_z = VisionCalibration.load_h(resolve_path(vcfg["calibration"]["output"]))
     intr = vcfg.get("intrinsics")
     p2b = PixelToBase(H, *(np.array(intr["K"]), np.array(intr["dist"])) if intr else (None, None))
+    if args.register != "off" and args.image:
+        p2b = register(rgb, p2b, cfg, apply=args.register == "on")
     policy_name = args.policy or icfg["policy"]
     policy = load_policy(cfg, policy_name)
     ik = ik_from_config(cfg)
@@ -100,6 +114,31 @@ def main() -> None:
     print(f"scene: {overlay_path}")
     if args.show:
         show(overlay, f"{name}: detections and planned grasps (any key closes)", overlay_path)
+
+
+def register(rgb: np.ndarray, p2b: PixelToBase, cfg: dict, apply: bool) -> PixelToBase:
+    """Compare the photo's view with the calibration view (taped grid); return the corrected pixel->base."""
+    from so101_tpgmm.vision.register import register_view, registered_p2b, warp_box
+
+    ref = cv2.imread(str(resolve_path(cfg["vision"]["reference_image"])))
+    try:
+        reg = register_view(rgb, cv2.cvtColor(ref, cv2.COLOR_BGR2RGB), p2b)
+    except RuntimeError as e:
+        print(f"WARNING: view not registered ({e}); using the calibration as is")
+        return p2b
+    print(reg.summary())
+    if not reg.ok:
+        print("WARNING: the taped grid could not be aligned reliably; using the calibration as is. "
+              "Check that the whole grid is visible and the camera points at the table.")
+        return p2b
+    if np.max(reg.shift_mm) > 5:
+        print(f"  the camera view differs from the calibration view ({'corrected' if apply else 'NOT corrected: --register on'})")
+    if not apply:
+        return p2b
+    vcfg = cfg["vision"]  # pixel regions defined on the calibration view follow the camera
+    vcfg["exclude_boxes"] = [warp_box(b, reg.W) for b in vcfg.get("exclude_boxes", [])]
+    vcfg["scene"]["arm_home_roi_px"] = warp_box(vcfg["scene"]["arm_home_roi_px"], reg.W)
+    return registered_p2b(p2b, reg)
 
 
 def show(rgb: np.ndarray, title: str, path: str) -> None:
