@@ -102,7 +102,7 @@ Deben aparecer `segmented.json` (y los demás modelos) y el archivo de calibraci
 python -m pytest -q tests/test_gripper_command_and_overlay.py
 ```
 
-Debe decir `3 passed`.
+Debe decir `2 passed`.
 
 ## 7. Planear y revisar la escena
 
