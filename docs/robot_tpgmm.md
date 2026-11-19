@@ -98,7 +98,7 @@ git pull
 git log --oneline -1
 ```
 
-Debe ser el commit «Real robot: register the camera view on the taped grid…» o uno posterior (incluye
+Debe ser `a8e8c01` («Real robot: register the camera view on the taped grid…») o uno posterior (incluye
 también el apriete de la pinza de `53f0eed`).
 
 ```bash
