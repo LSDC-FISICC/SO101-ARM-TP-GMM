@@ -53,6 +53,6 @@ Same environment and reward, no prior. See the learning curve: pick-and-place fr
 
 ## On the real robot
 
-`scripts/run_sac_real.py` runs the same observation/action loop on the SO-101 (`so101_tpgmm/rl/real_env.py`): cube from the fixed camera, converted to the finger-midpoint convention of the simulation (`rl.vision_to_finger_heading_mm`, measured on the 368 demonstrated grasps), joint commands at 30 Hz with LeRobot's per-command limit, tracking-error abort, operator-labelled success; `--finetune N` keeps training on real episodes, with a measurable grasp reward (jaws stopped open by the cube).
+`scripts/run_sac_real.py` runs the same observation/action loop on the SO-101 (`so101_tpgmm/rl/real_env.py`): cube from the fixed camera (`--camera`, top camera, 640×480; a moved camera view is corrected on the taped grid as in `infer.py`), converted to the finger-midpoint convention of the simulation (`rl.vision_to_finger_heading_mm`, measured on the 368 demonstrated grasps), joint commands at 30 Hz with LeRobot's per-command limit, tracking-error abort, operator-labelled success; `--finetune N` keeps training on real episodes, with a measurable grasp reward (jaws stopped open by the cube).
 
 Runs: `residual_attempt1`, `residual_attempt2`, `residual_s0`, `scratch_s0` (in `outputs/models/sac`, not versioned).

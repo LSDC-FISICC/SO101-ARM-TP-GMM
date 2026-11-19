@@ -8,7 +8,7 @@ the policy acts at 10 Hz and the operator says whether the cube ended in the box
 
     # deploy: 10 evaluation episodes, deterministic policy
     python scripts/run_sac_real.py --model outputs/models/sac/residual_s0/best_model.zip --mode residual \\
-        --episodes 10 --port /dev/ttyACM0 --camera 0
+        --episodes 10 --port /dev/ttyACM0 --camera 3
     # fine-tune on the robot for 3000 steps (~5 min of motion + resets), saving to rl.models_dir/real_<run>
     python scripts/run_sac_real.py --model ... --mode residual --finetune 3000 --port /dev/ttyACM0
     # without a robot (simulated follower, fixed cube): checks the plumbing
@@ -43,7 +43,9 @@ def main() -> None:
     ap.add_argument("--finetune", type=int, default=0, help="SAC steps on the robot")
     ap.add_argument("--port", default=None)
     ap.add_argument("--id", default="so101_follower")
-    ap.add_argument("--camera", default="0")
+    ap.add_argument("--camera", default="3", help="fixed top camera (OpenCV index or /dev/videoN)")
+    ap.add_argument("--register", action=argparse.BooleanOptionalAction, default=True,
+                    help="correct a moved camera view on the taped grid (as scripts/infer.py)")
     ap.add_argument("--max-step-deg", type=float, default=8.0)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--run", default="real")
@@ -65,7 +67,8 @@ def main() -> None:
             print(prompt + "(dry run)")
             return "n"
     else:
-        cube_source = CameraCubeSource(cfg, int(args.camera) if args.camera.isdigit() else args.camera)
+        cube_source = CameraCubeSource(cfg, int(args.camera) if args.camera.isdigit() else args.camera,
+                                       register=args.register)
         ask = input
     env = RealSO101Env(cfg, args.mode, runner=runner, cube_source=cube_source, ask=ask, realtime=not args.dry_run)
     runner.connect()

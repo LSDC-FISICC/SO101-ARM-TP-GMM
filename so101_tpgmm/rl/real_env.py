@@ -7,7 +7,7 @@ Per episode:
 
 1. The arm returns home (min-jerk, joint space) and the operator places a cube (Enter).
 2. The cube pose comes from the fixed camera (``CameraCubeSource``: the vision pipeline of
-   ``scripts/infer.py``), once — as in simulation, the policy does not track the cube while the
+   ``scripts/infer.py``, including the taped-grid correction of a moved camera view), once — as in simulation, the policy does not track the cube while the
    arm occludes it. The observation uses the cube centre *between the fingers* (vision position +
    ``rl.vision_to_finger_heading_mm`` rotated to the grasp heading); the TP-GMM of the residual
    mode receives the vision position, the convention it was trained with.
@@ -45,37 +45,65 @@ def finger_offset_xy(vision_xy: np.ndarray, heading: float, offset_heading_m: np
 class CameraCubeSource:
     """Pose of the first cube (colour order) from one image of the fixed camera."""
 
-    def __init__(self, cfg: dict, camera: int | str = 0) -> None:
+    def __init__(self, cfg: dict, camera: int | str = 0, register: bool = True) -> None:
         import cv2
 
         from so101_tpgmm.config import resolve_path
         from so101_tpgmm.vision.calibration import VisionCalibration
         from so101_tpgmm.vision.geometry import PixelToBase
 
-        self.cv2, self.cfg = cv2, cfg
+        self.cv2, self.cfg, self.register = cv2, cfg, register
         H, _, self.plane_z = VisionCalibration.load_h(resolve_path(cfg["vision"]["calibration"]["output"]))
         intr = cfg["vision"].get("intrinsics")
         self.p2b = PixelToBase(H, *(np.array(intr["K"]), np.array(intr["dist"])) if intr else (None, None))
         self.cap = cv2.VideoCapture(camera)
+        w, h = self.size = tuple(cfg["camera"]["image_size"])  # the recording / calibration mode
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+        self.last_good = None  # (p2b, cfg) of the last successful view registration
+
+    def grab(self) -> np.ndarray:
+        """Current RGB frame (the driver buffers a few frames: drop them, they predate the cube)."""
+        for _ in range(5):
+            ok, bgr = self.cap.read()
+        if not ok:
+            raise RuntimeError("camera read failed")
+        if bgr.shape[1::-1] != self.size:
+            raise RuntimeError(f"camera delivered {bgr.shape[1]}x{bgr.shape[0]}, the calibration is for "
+                               f"{self.size[0]}x{self.size[1]}")
+        return self.cv2.cvtColor(bgr, self.cv2.COLOR_BGR2RGB)
+
+    def view(self, rgb: np.ndarray):
+        """Pixel -> base and config for this image's view (taped-grid registration, as in infer.py)."""
+        if not self.register:
+            return self.p2b, self.cfg
+        from so101_tpgmm.vision.register import correct_view
+
+        p2b, cfg, reg = correct_view(rgb, self.p2b, self.cfg)
+        if reg is not None and reg.ok:
+            self.last_good = (p2b, cfg)
+        elif self.last_good is not None:  # e.g. a hand over the tape: keep the previous correction
+            print("  using the previous view correction")
+            return self.last_good
+        return p2b, cfg
 
     def __call__(self) -> tuple[np.ndarray, float]:
         from so101_tpgmm.inference import order_cubes
         from so101_tpgmm.vision.detection import DetectorParams, detect_cubes
         from so101_tpgmm.vision.scene import SceneParams, validate_detections
 
-        ok, bgr = self.cap.read()
-        if not ok:
-            raise RuntimeError("camera read failed")
-        rgb = self.cv2.cvtColor(bgr, self.cv2.COLOR_BGR2RGB)
-        vcfg = self.cfg["vision"]
+        rgb = self.grab()
+        p2b, cfg = self.view(rgb)
+        vcfg = cfg["vision"]
         dets = detect_cubes(rgb, DetectorParams.from_config(vcfg))
-        validate_detections(dets, self.p2b, SceneParams.from_config(vcfg["scene"], self.cfg["scene"]["cube_side"]))
+        validate_detections(dets, p2b, SceneParams.from_config(vcfg["scene"], cfg["scene"]["cube_side"]))
         dets = [d for d in dets if "partial_blob" not in d.flags]
         if not dets:
             raise RuntimeError("no cube detected")
-        xy = self.p2b.to_base(np.array([d.center_px for d in dets]))
-        i = order_cubes(dets, xy, self.cfg["inference"]["color_order"])[0]
-        return np.r_[xy[i], self.plane_z], float(self.p2b.yaw_to_base(dets[i].center_px, dets[i].yaw_img))
+        xy = p2b.to_base(np.array([d.center_px for d in dets]))
+        i = order_cubes(dets, xy, cfg["inference"]["color_order"])[0]
+        return np.r_[xy[i], self.plane_z], float(p2b.yaw_to_base(dets[i].center_px, dets[i].yaw_img))
 
 
 class RealSO101Env(gym.Env):

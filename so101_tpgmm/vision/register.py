@@ -111,3 +111,39 @@ def warp_box(box, W: np.ndarray) -> list[int]:
     c = apply_homography(W, np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], float))
     return [int(np.floor(c[:, 0].min())), int(np.floor(c[:, 1].min())), int(np.ceil(c[:, 0].max())),
             int(np.ceil(c[:, 1].max()))]
+
+
+def correct_view(rgb: np.ndarray, p2b: PixelToBase, cfg: dict, apply: bool = True, log=print
+                 ) -> tuple[PixelToBase, dict, Registration | None]:
+    """Register ``rgb`` (RGB, calibration size) to ``vision.reference_image`` and correct the calibration.
+
+    Returns the pixel -> base for this view, a copy of ``cfg`` whose pixel regions defined on the
+    calibration view (``vision.exclude_boxes``, ``vision.scene.arm_home_roi_px``) follow the camera, and
+    the registration (None if it failed). Used by ``scripts/infer.py`` (TP-GMM, LPV-DS, IK planner) and
+    by ``rl/real_env.py`` (SAC on the robot, scratch and residual), so every policy sees the same correction.
+    """
+    import copy
+
+    from so101_tpgmm.config import resolve_path
+
+    ref = cv2.imread(str(resolve_path(cfg["vision"]["reference_image"])))
+    try:
+        reg = register_view(rgb, cv2.cvtColor(ref, cv2.COLOR_BGR2RGB), p2b)
+    except RuntimeError as e:
+        log(f"WARNING: view not registered ({e}); using the calibration as is")
+        return p2b, cfg, None
+    log(reg.summary())
+    if not reg.ok:
+        log("WARNING: the taped grid could not be aligned reliably; using the calibration as is. "
+            "Check that the whole grid is visible and the camera points at the table.")
+        return p2b, cfg, reg
+    if np.max(reg.shift_mm) > 5:
+        log(f"  the camera view differs from the calibration view "
+            f"({'corrected' if apply else 'NOT corrected: --register on'})")
+    if not apply:
+        return p2b, cfg, reg
+    cfg = copy.deepcopy(cfg)
+    vcfg = cfg["vision"]
+    vcfg["exclude_boxes"] = [warp_box(b, reg.W) for b in vcfg.get("exclude_boxes", [])]
+    vcfg["scene"]["arm_home_roi_px"] = warp_box(vcfg["scene"]["arm_home_roi_px"], reg.W)
+    return registered_p2b(p2b, reg), cfg, reg

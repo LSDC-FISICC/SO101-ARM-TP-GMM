@@ -31,6 +31,7 @@ from so101_tpgmm.policies import POLICIES, load_policy  # noqa: E402
 from so101_tpgmm.vision.calibration import VisionCalibration  # noqa: E402
 from so101_tpgmm.vision.draw import draw_detections, draw_plan_overlay  # noqa: E402
 from so101_tpgmm.vision.geometry import PixelToBase  # noqa: E402
+from so101_tpgmm.vision.register import correct_view  # noqa: E402
 
 
 def main() -> None:
@@ -87,7 +88,8 @@ def main() -> None:
     intr = vcfg.get("intrinsics")
     p2b = PixelToBase(H, *(np.array(intr["K"]), np.array(intr["dist"])) if intr else (None, None))
     if args.register != "off" and args.image:
-        p2b = register(rgb, p2b, cfg, apply=args.register == "on")
+        p2b, cfg, _ = correct_view(rgb, p2b, cfg, apply=args.register == "on")
+        icfg, vcfg = cfg["inference"], cfg["vision"]
     policy_name = args.policy or icfg["policy"]
     policy = load_policy(cfg, policy_name)
     ik = ik_from_config(cfg)
@@ -114,31 +116,6 @@ def main() -> None:
     print(f"scene: {overlay_path}")
     if args.show:
         show(overlay, f"{name}: detections and planned grasps (any key closes)", overlay_path)
-
-
-def register(rgb: np.ndarray, p2b: PixelToBase, cfg: dict, apply: bool) -> PixelToBase:
-    """Compare the photo's view with the calibration view (taped grid); return the corrected pixel->base."""
-    from so101_tpgmm.vision.register import register_view, registered_p2b, warp_box
-
-    ref = cv2.imread(str(resolve_path(cfg["vision"]["reference_image"])))
-    try:
-        reg = register_view(rgb, cv2.cvtColor(ref, cv2.COLOR_BGR2RGB), p2b)
-    except RuntimeError as e:
-        print(f"WARNING: view not registered ({e}); using the calibration as is")
-        return p2b
-    print(reg.summary())
-    if not reg.ok:
-        print("WARNING: the taped grid could not be aligned reliably; using the calibration as is. "
-              "Check that the whole grid is visible and the camera points at the table.")
-        return p2b
-    if np.max(reg.shift_mm) > 5:
-        print(f"  the camera view differs from the calibration view ({'corrected' if apply else 'NOT corrected: --register on'})")
-    if not apply:
-        return p2b
-    vcfg = cfg["vision"]  # pixel regions defined on the calibration view follow the camera
-    vcfg["exclude_boxes"] = [warp_box(b, reg.W) for b in vcfg.get("exclude_boxes", [])]
-    vcfg["scene"]["arm_home_roi_px"] = warp_box(vcfg["scene"]["arm_home_roi_px"], reg.W)
-    return registered_p2b(p2b, reg)
 
 
 def show(rgb: np.ndarray, title: str, path: str) -> None:
