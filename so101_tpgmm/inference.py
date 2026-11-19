@@ -57,6 +57,21 @@ class Plan:
     detections: list[CubeDetection] = field(default_factory=list)
 
 
+def gripper_command(g: np.ndarray, gc: dict | None) -> np.ndarray:
+    """Gripper command for the follower from the plan's gripper (learned from the follower's measured value).
+
+    Below ``contact_level`` (jaws on the cube) the command is ``hold_command``, so the servo squeezes as the
+    operator's leader did; between ``contact_level`` and ``release_level`` it is interpolated; above
+    ``release_level`` the plan's value is kept. ``gc`` None returns the plan's value.
+    """
+    g = np.asarray(g, dtype=float)
+    if not gc:
+        return g
+    lo, hi, hold = float(gc["contact_level"]), float(gc["release_level"]), float(gc["hold_command"])
+    ramp = hold + (g - lo) * (hi - hold) / (hi - lo)
+    return np.where(g >= hi, g, np.where(g <= lo, hold, ramp))
+
+
 def cartesian_state(ik: SO101IK, q_deg: np.ndarray, gripper: float) -> np.ndarray:
     """[x, y, z, h, g, pitch] of the robot at joints ``q_deg``."""
     T = ik.kin.fk(np.deg2rad(q_deg[:5]))
@@ -149,7 +164,7 @@ def plan_from_image(rgb: np.ndarray, policy, ik: SO101IK, p2b: PixelToBase, cube
         if ro is None:
             continue
         qs = np.rad2deg(res.q)
-        gs = np.clip(ro.Y[:, ro.names.index("g")], 0, 100)
+        gs = gripper_command(np.clip(ro.Y[:, ro.names.index("g")], 0, 100), icfg.get("gripper_command"))
         for k, name in enumerate(policy.primitives):
             m = ro.primitive == k
             append(qs[m], gs[m], ro.Y[m], name, rank_i)

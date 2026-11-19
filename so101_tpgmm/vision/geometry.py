@@ -48,6 +48,17 @@ class PixelToBase:
         """(N, 2) pixels -> (N, 2) base XY [m]."""
         return apply_homography(self.H, self._und(uv))
 
+    def to_pixel(self, xy: np.ndarray) -> np.ndarray:
+        """(N, 2) base XY [m] on the calibration plane -> (N, 2) pixels (inverse of :meth:`to_base`)."""
+        und = apply_homography(np.linalg.inv(self.H), np.atleast_2d(np.asarray(xy, dtype=np.float64)))
+        if self.K is None or self.dist is None:
+            return und
+        import cv2
+
+        n = np.c_[(und - self.K[:2, 2]) / np.diag(self.K)[:2], np.ones(len(und))]  # normalized, z = 1
+        px, _ = cv2.projectPoints(n, np.zeros(3), np.zeros(3), self.K, self.dist)
+        return px.reshape(-1, 2)
+
     def yaw_to_base(self, center_px: np.ndarray, yaw_img: float, length_px: float = 10.0) -> float:
         """Image-plane orientation -> base-frame yaw [rad], folded to [-pi/4, pi/4).
 

@@ -165,6 +165,13 @@ inference:
   color_order: [red, yellow, green, blue]
   home_joints_deg: [-5.7, -104.3, 91.3, 76.3, 2.8]   # median rest posture of the demonstrations
   home_gripper: 1.5
+  # Gripper command sent to the follower. The TP-GMM learned the follower's *measured* gripper, which
+  # sits at ~20 while holding because the 4 cm cube stops the jaws; the operator's leader meanwhile
+  # commanded ~0.8 (median over 400 cycles, p75 10). Sending 20 puts the jaws exactly on the cube with
+  # no position error, so the servo does not squeeze and the cube is not lifted. Below contact_level the
+  # command becomes hold_command; between contact_level and release_level it is interpolated (no jump);
+  # above release_level the plan's value is sent unchanged.
+  gripper_command: {contact_level: 20.0, release_level: 26.0, hold_command: 2.0}
   return_home_s: 2.0         # joint-space return to home between cubes
   dt: 0.0333                 # 30 Hz, like the dataset
   require_full_ik: true      # skip a cube if any trajectory point has no IK solution
