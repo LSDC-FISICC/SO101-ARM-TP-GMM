@@ -39,6 +39,12 @@ def test_scratch_actions_are_rate_limited_and_stay_above_the_table():
     assert t.g_cmd == pytest.approx(TaskConfig().gripper_max)
 
 
+# The TP-GMM is trained by scripts/train.py (outputs/ is not versioned): skip on a fresh clone.
+needs_tpgmm = pytest.mark.skipif(not (resolve_path(CFG["tpgmm"]["models_dir"]) / "segmented.json").exists(),
+                                 reason="trained TP-GMM not available (run scripts/train.py)")
+
+
+@needs_tpgmm
 def test_residual_zero_action_follows_the_tp_gmm():
     t = _task("residual")
     t.reset(HOME, 1.5, np.array([0.25, 0.05, 0.0064]), 0.2)
@@ -49,6 +55,7 @@ def test_residual_zero_action_follows_the_tp_gmm():
     assert t.observe(HOME, 1.5).shape == (PickPlaceTask.obs_size("residual"),)
 
 
+@needs_tpgmm
 def test_real_env_dry_run():
     pytest.importorskip("mujoco")  # not needed, but keeps this test with the RL extras
     from so101_tpgmm.rl.real_env import RealSO101Env, finger_offset_xy
