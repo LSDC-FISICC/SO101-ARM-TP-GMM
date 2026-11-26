@@ -11,7 +11,8 @@ It streams the joint trajectory written by ``scripts/infer.py`` to ``SO101Follow
    per-step safety clamp, and stop (holding the last command) on Ctrl+C.
 
 ``--dry-run`` replaces the robot by a simulated one (no LeRobot needed), which is what the tests
-use. This module is a starting point: grasp verification, collision checks and a proper
+use. It plays a plan open loop; grasp verification and replanning of a missed cube are in
+``so101_tpgmm/robot/pick_place.py`` (``scripts/run_pick_place.py``). Collision checks and a proper
 emergency stop are out of scope.
 
     python -m so101_tpgmm.robot.so101_runner --npz outputs/inference/plan.npz --port /dev/ttyACM0
@@ -95,6 +96,31 @@ class SO101Runner:
 
     def _send(self, q: np.ndarray) -> None:
         self.robot.send_action({k: float(v) for k, v in zip(JOINT_KEYS, q)})
+
+    def stream(self, joints_deg: np.ndarray, gripper: np.ndarray, dt: float = 1 / 30, realtime: bool = True) -> bool:
+        """Send the samples at ``dt``; on Ctrl+C hold where the arm is and return False."""
+        try:
+            t_start = time.perf_counter()
+            for k, q in enumerate(np.c_[joints_deg, gripper]):
+                if realtime:
+                    delay = k * dt - (time.perf_counter() - t_start)
+                    if delay > 0:
+                        time.sleep(delay)
+                self._send(q)
+        except KeyboardInterrupt:
+            self._send(self.read_state())
+            return False
+        return True
+
+    def move_to(self, q_deg: np.ndarray, gripper: float, seconds: float = 2.0, realtime: bool = True) -> bool:
+        """Min-jerk joint move from the measured state."""
+        cur = self.read_state()
+        n = max(2, int(seconds * 30))
+        s = np.linspace(0, 1, n)
+        s = (10 * s**3 - 15 * s**4 + 6 * s**5)[:, None]
+        target = np.r_[np.asarray(q_deg, float)[:5], gripper]
+        path = cur + (target - cur) * s
+        return self.stream(path[:, :5], path[:, 5], realtime=realtime)
 
     def play(self, t: np.ndarray, joints_deg: np.ndarray, gripper: np.ndarray, approach_s: float = 2.0,
              realtime: bool = True) -> int:

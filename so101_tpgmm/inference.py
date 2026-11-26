@@ -41,6 +41,7 @@ class CubePlan:
     n_samples: int = 0
     grasp_yaw: float = float("nan")  # chosen equivalent cube yaw (jaw heading frame) [rad]
     ambiguous: bool = False  # two equivalent yaws were close: chosen by IK feasibility / joint motion
+    k_contact: int = -1  # plan sample right after the grasp contact (start of the transport), -1 if not planned
 
 
 @dataclass
@@ -127,17 +128,81 @@ def plan_cube(policy, ik: SO101IK, cp: CubePlan, q_deg: np.ndarray, g: float, cf
     return ro, res
 
 
+@dataclass
+class CubeTrajectory:
+    """Joint trajectory of one cube (approach, grasp, transport, release), before the return home."""
+
+    joints_deg: np.ndarray  # (N, 5)
+    gripper: np.ndarray  # (N,) command sent to the follower (``gripper_command`` applied)
+    cartesian: np.ndarray  # (N, 6)
+    phase: list[str]  # per sample: the policy's primitive names
+    k_contact: int  # first sample after the grasp contact (start of the transport primitive)
+
+
+def cube_trajectory(policy, ik: SO101IK, cp: CubePlan, q_deg: np.ndarray, g: float, cfg: dict,
+                    heading: float | None = None, box: np.ndarray | None = None,
+                    robot_gripper: bool = True) -> CubeTrajectory | None:
+    """``plan_cube`` as a joint trajectory; None if the cube is skipped (``cp.status`` says why).
+    ``robot_gripper``: apply ``inference.gripper_command`` (squeeze while holding, as on the real follower)."""
+    ro, res = plan_cube(policy, ik, cp, q_deg, g, cfg, heading=heading, box=box)
+    if ro is None:
+        return None
+    g_plan = np.clip(ro.Y[:, ro.names.index("g")], 0, 100)
+    gs = gripper_command(g_plan, cfg["inference"].get("gripper_command")) if robot_gripper else g_plan
+    names = list(getattr(policy, "primitives", ["cycle"]))
+    prim = np.asarray(getattr(ro, "primitive", np.zeros(len(ro.Y), int)))
+    phase = [names[int(k)] if int(k) < len(names) else "cycle" for k in prim]
+    if prim.max() > 0:
+        k_contact = int(np.flatnonzero(prim > 0)[0])
+    else:  # single primitive: the gripper's closing (first drop below the contact level after opening)
+        from so101_tpgmm.evaluation.metrics import closing_index
+
+        k_contact = int(closing_index(g_plan))
+    return CubeTrajectory(np.rad2deg(res.q), gs, ro.Y, phase, k_contact)
+
+
+def recovery_trajectory(ik: SO101IK, q_deg: np.ndarray, g: float, cfg: dict, open_to: float = 40.0,
+                        lift_m: float = 0.06) -> tuple[np.ndarray, np.ndarray]:
+    """After a missed grasp: open the gripper in place, lift the TCP straight up ``lift_m`` (skipped if IK
+    cannot), and return home in joint space. Returns (joints_deg, gripper)."""
+    icfg = cfg["inference"]
+    dt = float(icfg["dt"])
+    home, g_home = np.asarray(icfg["home_joints_deg"], float), float(icfg["home_gripper"])
+    q_deg = np.asarray(q_deg, float)[:5]
+    n_open = max(2, int(round(0.5 / dt)))
+    Q, G = [np.repeat(q_deg[None], n_open, 0)], [np.linspace(g, open_to, n_open)]
+    q_end = q_deg
+    if lift_m > 0:
+        x = cartesian_state(ik, q_deg, open_to)
+        n = max(2, int(round(1.0 / dt)))
+        s = min_jerk(np.linspace(0, 1, n))
+        P = x[:3] + np.outer(s, [0.0, 0.0, lift_m])
+        res = ik.solve_trajectory(P, np.full(n, tool_yaw_from_heading(x[3])), np.deg2rad(q_deg), max_restarts=3,
+                                  pitch=np.full(n, x[5]))
+        if res.success.all():
+            q_lift = np.rad2deg(res.q)
+            Q.append(q_lift), G.append(np.full(n, open_to))
+            q_end = q_lift[-1]
+    qh, gh = joint_move(q_end, home, open_to, g_home, float(icfg["return_home_s"]), dt)
+    Q.append(qh[1:]), G.append(gh[1:])
+    return np.vstack(Q), np.concatenate(G)
+
+
 def plan_from_image(rgb: np.ndarray, policy, ik: SO101IK, p2b: PixelToBase, cube_z: float, cfg: dict,
                     start_joints_deg: np.ndarray | None = None, start_gripper: float | None = None,
-                    colors: list[str] | None = None) -> Plan:
-    """Full pipeline (see module docstring)."""
+                    colors: list[str] | None = None, only_colors: bool = False,
+                    max_cubes: int | None = None) -> Plan:
+    """Full pipeline (see module docstring). ``only_colors``: ignore cubes of other colours; ``max_cubes``:
+    plan only the first ones in order (the closed-loop executor plans one cube per photo)."""
     icfg, vcfg = cfg["inference"], cfg["vision"]
     dp = DetectorParams.from_config(vcfg)
     sp = SceneParams.from_config(vcfg["scene"], cfg["scene"]["cube_side"])
     dets = detect_cubes(rgb, dp)
+    if only_colors and colors:
+        dets = [d for d in dets if d.color in colors]
     validate_detections(dets, p2b, sp)
     xy = p2b.to_base(np.array([d.center_px for d in dets])) if dets else np.zeros((0, 2))
-    order = order_cubes(dets, xy, colors or icfg["color_order"])
+    order = order_cubes(dets, xy, colors or icfg["color_order"])[:max_cubes]
     home = np.asarray(icfg["home_joints_deg"], dtype=float)
     q = np.asarray(home if start_joints_deg is None else start_joints_deg, dtype=float)
     g = float(icfg["home_gripper"] if start_gripper is None else start_gripper)
@@ -160,16 +225,17 @@ def plan_from_image(rgb: np.ndarray, policy, ik: SO101IK, p2b: PixelToBase, cube
         if "partial_blob" in d.flags:
             cp.status = "skipped: partial blob (cube partly hidden or lost in the mask)"
             continue
-        ro, res = plan_cube(policy, ik, cp, q, g, cfg)
-        if ro is None:
+        ct = cube_trajectory(policy, ik, cp, q, g, cfg)
+        if ct is None:
             continue
-        qs = np.rad2deg(res.q)
-        gs = gripper_command(np.clip(ro.Y[:, ro.names.index("g")], 0, 100), icfg.get("gripper_command"))
-        for k, name in enumerate(policy.primitives):
-            m = ro.primitive == k
-            append(qs[m], gs[m], ro.Y[m], name, rank_i)
+        qs, gs = ct.joints_deg, ct.gripper
+        cp.k_contact = sum(len(x) for x in T) + ct.k_contact
+        ph = np.array(ct.phase)
+        for name in dict.fromkeys(ct.phase):
+            m = ph == name
+            append(qs[m], gs[m], ct.cartesian[m], name, rank_i)
         qh, gh = joint_move(qs[-1], home, gs[-1], float(icfg["home_gripper"]), float(icfg["return_home_s"]), dt)
-        append(qh[1:], gh[1:], np.full((len(qh) - 1, ro.Y.shape[1]), np.nan), "return_home", -1)
+        append(qh[1:], gh[1:], np.full((len(qh) - 1, ct.cartesian.shape[1]), np.nan), "return_home", -1)
         q, g = home.copy(), float(icfg["home_gripper"])
     if not T:
         return Plan(np.zeros(0), np.zeros((0, 5)), np.zeros(0), np.zeros((0, 6)), [], np.zeros(0, int), cubes, dets)

@@ -23,7 +23,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from so101_tpgmm.evaluation.metrics import closing_index
-from so101_tpgmm.inference import CubePlan, cartesian_state, joint_move, plan_cube
+from so101_tpgmm.grasp import GraspCheckParams, check_index, verify_grasp
+from so101_tpgmm.inference import CubePlan, cartesian_state, cube_trajectory, joint_move, recovery_trajectory
 from so101_tpgmm.kinematics.ik import SO101IK
 from so101_tpgmm.sim.runner import Simulator, gripper_to_rad
 from so101_tpgmm.sim.scene import SceneSpec, SimCube, build_model
@@ -124,6 +125,8 @@ class CubeOutcome:
     held_at_release: bool = False  # still in the gripper (> 3 cm above its start) when the gripper opened
     released_over_box: bool = False  # cube inside the box footprint when the gripper opened
     cycle_s: float = float("nan")
+    attempts: int = 0  # grasp attempts (planned trajectories executed up to the grasp check)
+    checks: list = field(default_factory=list)  # per check: predicted / true held, measured and commanded gripper
 
 
 def release_index(closed: np.ndarray) -> int | None:
@@ -164,13 +167,20 @@ def _score(oc: CubeOutcome, spec: SceneSpec, i: int, start: np.ndarray, cubes_xy
 def run_episode(policy, ik: SO101IK, cfg: dict, spec: SceneSpec, geom: FingerGeometry, rng: np.random.Generator,
                 noise_mm: float = 0.0, grasp_mode: str = "contact", render: tuple[int, int] | None = None,
                 camera=None, render_every: int = 2, frame_callback=None,
-                box_offsets: list | None = None) -> tuple[list[CubeOutcome], list]:
+                box_offsets: list | None = None, replan: int | None = None,
+                robot_gripper: bool = False) -> tuple[list[CubeOutcome], list]:
     """Pick and place every cube of ``spec`` with ``policy``; returns per-cube outcomes and video frames
     (``frame_callback(sim)``, if given, is called instead of the built-in renderer).
 
     ``box_offsets``: optional [dx, dy] per picked cube (in order) added to the policy's box frame, so the
     k-th cube is released in its own slot of the box (a task parameter the policies were never trained
-    to vary: the box did not move in the demonstrations)."""
+    to vary: the box did not move in the demonstrations).
+
+    ``replan``: verify every grasp (``so101_tpgmm.grasp``: measured vs commanded gripper ``settle_s`` after the
+    command reaches its hold value) and, after a miss, open, lift, go home, re-detect the cube where it now is
+    (with a new perception-noise draw) and plan it again, up to ``replan`` times. ``robot_gripper``: send the
+    real follower's gripper command (squeeze while holding, ``inference.gripper_command``) instead of the
+    learned gripper value; the check needs it (with the learned ~20 the jaws barely press on the cube)."""
     icfg = cfg["inference"]
     dt = float(icfg["dt"])
     home = np.asarray(icfg["home_joints_deg"], float)
@@ -209,27 +219,60 @@ def run_episode(policy, ik: SO101IK, cfg: dict, spec: SceneSpec, geom: FingerGeo
             _score(oc, spec, i, now, np.concatenate([traj, back.cubes_xyz]), np.r_[gs, gh[1:]] < sim.open_threshold)
             frames += fr + back.frames
             continue
-        best = None
-        for h in options:
-            p, res_err = policy_input(policy, ik, geom, spec, cube_now, h, q_deg, g, cfg)
-            if noise_mm > 0:
-                p[:2] += rng.normal(0, noise_mm * 1e-3, 2)
-            cp = CubePlan(cube.color, p, cube.yaw, len(frames))
-            ro, res = plan_cube(policy, ik, cp, q_deg, g, cfg, heading=h, box=box)
-            score = (ro is not None, -float(np.abs(np.diff(res.q, axis=0)).sum()) if ro is not None else 0.0)
-            if best is None or score > best[0]:
-                best = (score, cp, ro, res, res_err)
-        _, cp, ro, res, res_err = best
-        oc.ambiguous, oc.input_residual_mm = len(options) > 1, res_err * 1e3
-        if ro is None:
-            oc.status = cp.status
-            continue
-        qs, gs = np.rad2deg(res.q), np.clip(ro.Y[:, ro.names.index("g")], 0, 100)
-        qh, gh = joint_move(qs[-1], home, gs[-1], g_home, float(icfg["return_home_s"]), dt)
-        out = sim.execute(np.vstack([qs, qh[1:]]), np.r_[gs, gh[1:]], dt, render_every=render_every)
-        _score(oc, spec, i, now, out.cubes_xyz, np.r_[gs, gh[1:]] < sim.open_threshold)
-        oc.cycle_s = float(len(qs) * dt)
-        frames += out.frames
+        gp = GraspCheckParams.from_config(cfg)
+        check = replan is not None
+        z0 = now[2]
+        while True:
+            best = None
+            for h in options:
+                p, res_err = policy_input(policy, ik, geom, spec, cube_now, h, q_deg, g, cfg)
+                if noise_mm > 0:
+                    p[:2] += rng.normal(0, noise_mm * 1e-3, 2)
+                cp = CubePlan(cube.color, p, cube.yaw, len(frames))
+                ct = cube_trajectory(policy, ik, cp, q_deg, g, cfg, heading=h, box=box, robot_gripper=robot_gripper)
+                score = (ct is not None, -float(np.abs(np.diff(ct.joints_deg, axis=0)).sum()) if ct is not None else 0.0)
+                if best is None or score > best[0]:
+                    best = (score, cp, ct, res_err)
+            _, cp, ct, res_err = best
+            oc.ambiguous, oc.input_residual_mm = len(options) > 1, res_err * 1e3
+            if ct is None:
+                oc.status = cp.status
+                break
+            qs, gs = ct.joints_deg, ct.gripper
+            qh, gh = joint_move(qs[-1], home, gs[-1], g_home, float(icfg["return_home_s"]), dt)
+            q_all, g_all = np.vstack([qs, qh[1:]]), np.r_[gs, gh[1:]]
+            oc.attempts += 1
+            if check:
+                kc = check_index(gs, ct.k_contact, dt, gp.settle_s)
+                out1 = sim.execute(q_all[:kc + 1], g_all[:kc + 1], dt, render_every=render_every)
+                verdict = verify_grasp(sim.joints_deg_gripper()[1], g_all[kc], gp)
+                held_true = bool(sim.cube_positions()[i, 2] - z0 > 0.02)
+                oc.checks.append(dict(pred=verdict.held, true=held_true, g_meas=round(verdict.g_meas, 1),
+                                      g_cmd=round(verdict.g_cmd, 1)))
+                frames += out1.frames
+                if not verdict.held and oc.attempts <= replan:
+                    q_now, g_now = sim.joints_deg_gripper()
+                    rq, rg = recovery_trajectory(ik, q_now, float(g_all[kc]), cfg, gp.open_gripper, gp.retreat_height_m)
+                    frames += sim.execute(rq, rg, dt, render_every=render_every).frames
+                    now = sim.cube_positions()[i]
+                    if in_box(spec, now) or abs(now[2] - spec.table_height(*now[:2])) > 0.05:
+                        break  # dropped into the box, or off the table: nothing left to pick
+                    cube_now = SimCube(cube.color, now.copy(), cube.yaw)
+                    q_deg, g = sim.joints_deg_gripper()
+                    target = heading_target(now[:2], np.asarray(policy.meta["pan_xy"]), policy.meta["heading_offset"])
+                    options = ambiguous_candidates(cube.yaw, target, np.deg2rad(icfg.get("ambiguity_margin_deg", 10.0)))
+                    z0 = now[2]
+                    continue
+                out2 = sim.execute(q_all[kc + 1:], g_all[kc + 1:], dt, render_every=render_every)
+                cubes_xyz = np.concatenate([out1.cubes_xyz, out2.cubes_xyz])
+                frames += out2.frames
+            else:
+                out = sim.execute(q_all, g_all, dt, render_every=render_every)
+                cubes_xyz = out.cubes_xyz
+                frames += out.frames
+            _score(oc, spec, i, now, cubes_xyz, g_all < sim.open_threshold)
+            oc.cycle_s = float(len(qs) * dt)
+            break
     end = sim.cube_positions()
     for i, oc in enumerate(outcomes):
         oc.final_xyz = np.round(end[i], 4).tolist()

@@ -204,6 +204,39 @@ más de 8° de golpe. Si sale al inicio, probablemente el brazo no estaba exacta
 reposo con que se planeó: déjalo en reposo antes de planear, o pasa su pose actual al planear con
 `--start-joints` (cinco ángulos en grados).
 
+### 10b. Con verificación del agarre y replanificación
+
+El paso 10 reproduce el plan sin mirar: si un agarre falla, el brazo lleva la pinza vacía al recipiente y
+sigue con el siguiente cubo. `scripts/run_pick_place.py` trabaja un cubo a la vez y revisa cada agarre:
+
+1. Lleva el brazo a reposo, toma una foto con la cámara fija (con la corrección de vista) y planea el cubo
+   de ese color desde la pose medida.
+2. Ejecuta hasta medio segundo después de cerrar la pinza (el brazo ya está subiendo) y revisa el agarre:
+   con el cubo entre las mordazas, la pinza medida queda cerca de 20 aunque el comando sea 2; vacía, llega
+   al comando. Opcionalmente confirma con la cámara de la muñeca que el cubo esté entre las mordazas.
+3. Si lo tiene, termina el transporte y lo suelta. Si no, abre, sube 6 cm, vuelve a reposo, toma otra
+   foto (el cubo pudo moverse) y lo vuelve a planear, hasta 2 veces (`grasp_check.max_retries`).
+
+```bash
+python scripts/run_pick_place.py --port /dev/ttyACM0 --camera 3 --colors red yellow green
+```
+
+Con la cámara de la muñeca (índice 1 en la grabación):
+
+```bash
+python scripts/run_pick_place.py --port /dev/ttyACM0 --camera 3 --wrist-camera 1 --colors red yellow green
+```
+
+En cada intento imprime algo así:
+
+```
+[red]   MISSED: gripper measured 2.4 vs commanded 2.0 (jaws reached the command (margin 0.4 < 8.0))
+[red]   HELD: gripper measured 19.8 vs commanded 2.0
+```
+
+Al final, un resumen por cubo: `released`, `missed after 3 attempts`, `not found` o `aborted` (Ctrl+C).
+Umbrales y evidencia: `docs/grasp_check.md`. `--no-check` ejecuta sin verificar, como el paso 10.
+
 ## 11. Ajustar la fuerza de la pinza
 
 Cambia `hold_command` y repite desde el paso 8 (planear) y el paso 10 (ejecutar):
