@@ -119,7 +119,13 @@ def report(df: pd.DataFrame, policy: str, out_md: Path) -> str:
               f"Measured − commanded gripper at the check: held median "
               f"{(ch.g_meas - ch.g_cmd)[ch.true].median():.1f} (min {(ch.g_meas - ch.g_cmd)[ch.true].min():.1f}), "
               f"missed median {(ch.g_meas - ch.g_cmd)[~ch.true].median():.1f} "
-              f"(max {(ch.g_meas - ch.g_cmd)[~ch.true].max():.1f}); threshold `grasp_check.min_margin`."]
+              f"(max {(ch.g_meas - ch.g_cmd)[~ch.true].max():.1f}); threshold `grasp_check.min_margin`.",
+              "",
+              f"No missed grasp was taken as held. The {fn} checks *detected missed* while the cube was rising had the "
+              f"jaws (nearly) closed (measured gripper {ch.g_meas[~ch.pred & ch.true].min():.1f}–"
+              f"{ch.g_meas[~ch.pred & ch.true].max():.1f}): the cube was carried on a finger tip or caught by a corner, "
+              "not pinched between the jaws. Releasing it and planning again is the conservative choice; the "
+              f"held verdicts had a margin of at least {(ch.g_meas - ch.g_cmd)[ch.pred].min():.1f}."]
     L += ["", "## The signals (real data)\n",
           "Measured on dataset3 (`so101_tpgmm/grasp.py`):\n",
           "| signal | holding a cube | gripper closed empty | threshold |", "|---|---|---|---|",

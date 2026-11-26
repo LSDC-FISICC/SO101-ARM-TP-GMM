@@ -183,6 +183,36 @@ scripts/fetch_so101_mujoco.sh
 MUJOCO_GL=egl python scripts/simulate_mujoco.py --episodes 30 --noise-mm 0 8 --video 1
 ```
 
+## Verificar el agarre y replanificar
+
+Un plan se ejecutaba en lazo abierto: si el agarre fallaba, el brazo llevaba la pinza vacía al recipiente y
+seguía. Ahora cada agarre se verifica medio segundo después de cerrar. Con el cubo entre las mordazas, la
+pinza medida queda cerca de 20 aunque el comando sea 2; vacía, llega al comando (dataset3: 19,1 de mediana
+sosteniendo; como mucho 6,6 cerrada en vacío). Opcionalmente lo confirma la cámara de la muñeca. Si falló:
+abre, sube, vuelve a reposo, toma otra foto y planea ese cubo de nuevo (hasta 2 veces). Detalle y evidencia
+en [`docs/grasp_check.md`](docs/grasp_check.md).
+
+![Agarre fallido, retirada y replanificación](docs/figures/sim_grasp_replan.gif)
+
+| error de percepción | lazo abierto: entregados | con verificación: entregados |
+|---|---|---|
+| 0 mm | 98 % | 98 % |
+| 8 mm (el de la visión real) | 78 % | **99 %** |
+| 15 mm | 50 % | **81 %** |
+| 25 mm | 29 % | **49 %** |
+
+MuJoCo, TP-GMM, 90 cubos por fila, mismas disposiciones. En 575 verificaciones ningún agarre fallido se tomó
+como bueno. En la simulación cada foto nueva trae un error independiente; en el robot parte del error de la
+cámara se repite de foto en foto, así que la ganancia real puede ser menor.
+
+```bash
+python scripts/run_pick_place.py --port /dev/ttyACM0 --camera 3 --colors red yellow green
+```
+
+```bash
+MUJOCO_GL=egl python scripts/eval_grasp_replan.py --episodes 30 --noise-mm 0 8 15 25 --workers 4
+```
+
 ## SAC: desde cero y residual sobre el TP-GMM
 
 Mismo entorno en MuJoCo y en el robot real (`so101_tpgmm/rl/`):
@@ -365,7 +395,9 @@ so101_tpgmm/
     sim_env.py                entorno Gymnasium en MuJoCo: recompensa por etapas, aleatorización de dominio
     real_env.py               el mismo entorno en el SO-101 real (cámara, seguridad, éxito del operador)
     agent.py                  política SAC en lazo cerrado dentro de la simulación de tres cubos
+  grasp.py                    verificación del agarre: pinza medida vs comandada, cámara de la muñeca
   robot/so101_runner.py       stub para ejecutar en SO101Follower (LeRobot), con modo dry-run
+  robot/pick_place.py         ejecución en lazo cerrado: foto → plan → verificar → terminar o replanificar
 scripts/
   inspect_dataset.py          Fase 0: reporte, figuras y CSV por episodio
   calibrate_camera_grid.py    calibración métrica con la cuadrícula
@@ -385,6 +417,8 @@ scripts/
   train_sac.py                entrena SAC (desde cero o residual sobre el TP-GMM)
   eval_sac.py                 evaluación de SAC vs TP-GMM y reporte; plot_sac.py: curvas de aprendizaje
   run_sac_real.py             SAC en el robot real: despliegue y ajuste fino
+  run_pick_place.py           robot real: un cubo a la vez, verificación del agarre y replanificación
+  eval_grasp_replan.py        MuJoCo: lazo abierto vs verificación + replanificación bajo error de percepción
   act/train_act_spark.sh      entrena ACT (LeRobot) en la Spark: preset constante (A) o warm-up + coseno (B)
   act/eval_act_offline.py     evaluación offline de ACT en los 40 episodios reservados
   act/lerobot_train_wandb.py  lerobot-train con registro en Weights & Biases (LeRobot 0.7 solo usa Trackio)
@@ -407,7 +441,7 @@ docs/
   perturbation_report.md      prueba de perturbaciones (generado)
   silent_failures.md          catálogo de fallas silenciosas y sus guardas
   episodes_summary.csv        ciclos, instantes y posiciones por episodio
-tests/                        pytest (107 tests)
+tests/                        pytest (118 tests)
 ```
 
 ## Decisiones de diseño
